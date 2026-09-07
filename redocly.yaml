@@ -1,0 +1,28 @@
+# Configuração do lint do contrato OpenAPI.
+#
+# O gate do CLAUDE.md (RULE 3) exige `npx @redocly/cli lint` limpo. Para isso
+# significar alguma coisa, as três regras desligadas abaixo são desligadas
+# **com motivo** — e não silenciadas caso a caso quando incomodam.
+
+apis:
+  shopmaster:
+    root: docs/openapi/openapi.yaml
+
+extends:
+  - recommended
+
+rules:
+  # O servidor de desenvolvimento é localhost mesmo. A regra existe para pegar
+  # `example.com` esquecido num contrato publicado; aqui é o endereço real.
+  no-server-example.com: off
+
+  # `Error`, `Money` e `Pagination` são o vocabulário compartilhado da API,
+  # declarados antes dos endpoints que vão referenciá-los. Ligar esta regra de
+  # volta quando o catálogo de rotas estiver estável vale a pena — aí um schema
+  # órfão é de fato lixo.
+  no-unused-components: off
+
+  # As duas rotas meta (`/v1` e `/up`) não têm 4xx real. Documentar um cenário
+  # inventado para calar o linter violaria a RULE 3 do CLAUDE.md, que proíbe
+  # exatamente isso.
+  operation-4xx-response: off

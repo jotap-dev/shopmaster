@@ -1,0 +1,46 @@
+services:
+  app:
+    build:
+      context: .
+    image: shopmaster-api
+    ports:
+      # Configurável porque 8000 costuma já estar ocupado por outro projeto:
+      #   APP_PORT=8001 docker compose up -d
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      # Código montado do host: editar uma classe reflete sem rebuild.
+      - .:/app
+      # Volume anônimo protegendo o vendor/ instalado na imagem — sem ele o
+      # bind mount de cima esconderia as dependências e o container sobe vazio.
+      - /app/vendor
+    environment:
+      # Postgres e Redis rodam no HOST, não em container: é o setup local do
+      # projeto (ver docs/docker.md para a variante com serviços containerizados).
+      DB_HOST: host.docker.internal
+      REDIS_HOST: host.docker.internal
+    # No macOS o `host.docker.internal` já resolve sozinho; no Linux, não —
+    # precisa deste mapeamento. No Colima ele resolve para o mesmo IP, então
+    # declarar aqui é seguro e torna o compose portável.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # Worker da fila (e-mail transacional, webhook de pagamento).
+  # Só entra em cena na Fase 9 — subir com: docker compose --profile worker up -d
+  worker:
+    build:
+      context: .
+    image: shopmaster-api
+    command: ["php", "artisan", "queue:work", "--tries=3", "--max-time=3600"]
+    volumes:
+      - .:/app
+      - /app/vendor
+    environment:
+      DB_HOST: host.docker.internal
+      REDIS_HOST: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - app
+    restart: unless-stopped
+    profiles: [worker]

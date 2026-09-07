@@ -1,0 +1,143 @@
+openapi: 3.1.0
+
+info:
+  title: ShopMaster API
+  version: 0.1.0
+  description: |
+    API REST de marketplace multi-lojista. Domínio modelado em DDD com
+    bounded contexts; comprador, lojista e plataforma consomem os mesmos
+    recursos, separados por **autorização**, não por formato de resposta.
+
+    A autorização tem duas camadas: o papel de plataforma (`buyer`,
+    `seller`, `platform_admin`) viaja no token; o papel de loja (`owner`,
+    `admin`, `finance`) é resolvido por requisição, a partir do `storeId`
+    da rota.
+
+    Este arquivo é o **contrato**, mantido à mão — não é gerado por anotação
+    no código. Rota que não está aqui não existe para quem consome a API.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+
+servers:
+  - url: http://localhost:8000
+    description: Desenvolvimento local
+
+tags:
+  - name: Meta
+    description: Informações da própria API
+  # Uma tag por bounded context, com o mesmo nome de src/<Context>/.
+  # Entram conforme as fases do plano:
+  # - name: Identity
+  # - name: Store
+  # - name: Catalog
+  # - name: Inventory
+  # - name: Pricing
+  # - name: Cart
+  # - name: Shipping
+  # - name: Ordering
+  # - name: Payment
+  # - name: Review
+
+paths:
+  /v1:
+    get:
+      tags: [Meta]
+      operationId: getApiIdentity
+      summary: Identificação da API
+      description: Devolve nome, versão e o endereço desta documentação.
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, version, docs]
+                properties:
+                  name:
+                    type: string
+                  version:
+                    type: string
+                  docs:
+                    type: string
+                    format: uri
+              example:
+                name: ShopMaster
+                version: v1
+                docs: http://localhost:8000/docs
+
+  /up:
+    get:
+      tags: [Meta]
+      operationId: getHealth
+      summary: Health check
+      description: Usado pelo Docker e pelo balanceador. Não faz parte do contrato de negócio.
+      security: []
+      responses:
+        '200':
+          description: Aplicação de pé.
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Access token emitido por `POST /v1/auth`. Carrega os papéis de
+        plataforma do usuário — **não** os papéis de loja, que são
+        resolvidos por requisição.
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Código estável, em snake_case. É por ele que o cliente decide o que fazer.
+              examples: [product_not_found]
+            message:
+              type: string
+              description: Texto legível. Pode mudar sem aviso; não use como chave.
+              examples: ['Produto 42 nao encontrado.']
+
+    Money:
+      type: object
+      description: |
+        Valor monetário em **centavos**, nunca decimal — ponto flutuante
+        erra centavo em soma de carrinho.
+      required: [amount, currency]
+      properties:
+        amount:
+          type: integer
+          description: Valor em centavos.
+          examples: [19990]
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          description: Código ISO-4217.
+          examples: [BRL]
+
+    Pagination:
+      type: object
+      required: [total, per_page, current_page]
+      properties:
+        total:
+          type: integer
+        per_page:
+          type: integer
+        current_page:
+          type: integer
+        next_cursor:
+          type: [string, 'null']
+
+security:
+  - bearerAuth: []

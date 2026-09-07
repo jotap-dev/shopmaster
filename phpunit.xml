@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+>
+    <testsuites>
+        <!-- Regra de negócio: Domain/ e Application/ com fake das portas.
+             Sem banco, sem HTTP, sem Redis. Roda em milissegundos. -->
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+
+        <!-- I/O real: repositórios contra o Postgres de teste e rotas HTTP. -->
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+
+        <!-- A regra de dependência entre camadas e contextos, testada. -->
+        <testsuite name="Architecture">
+            <directory>tests/Architecture</directory>
+        </testsuite>
+    </testsuites>
+
+    <source>
+        <include>
+            <directory>app</directory>
+            <directory>src</directory>
+        </include>
+    </source>
+
+    <php>
+        <env name="APP_ENV" value="testing"/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <env name="BCRYPT_ROUNDS" value="4"/>
+        <env name="BROADCAST_CONNECTION" value="null"/>
+
+        <!-- Banco de teste dedicado e DESCARTÁVEL: RefreshDatabase apaga e
+             recria o schema a cada execução. Definido aqui, não no .env —
+             variável do phpunit.xml vence o .env (o Dotenv do Laravel não
+             sobrescreve o que já existe no ambiente), então a suíte não tem
+             como cair no banco de desenvolvimento por engano.
+             tests/TestCase.php confirma isso a cada teste. -->
+        <env name="DB_CONNECTION" value="pgsql"/>
+        <env name="DB_DATABASE" value="shopmaster_test"/>
+        <env name="DB_URL" value=""/>
+
+        <!-- Cache em array na maioria dos testes. Os stores de Redis
+             continuam sendo Redis de verdade (é o que se quer provar), mas
+             na faixa alta de DBs: entrada de teste nunca serve requisição de
+             dev, e o isolamento entre usos vale na suíte também — carrinho
+             de teste não pode colidir com cache de catálogo de teste. -->
+        <env name="CACHE_STORE" value="array"/>
+        <env name="REDIS_DB" value="12"/>
+        <env name="REDIS_CATALOG_DB" value="15"/>
+        <env name="REDIS_CART_DB" value="14"/>
+        <env name="REDIS_RESERVATIONS_DB" value="13"/>
+
+        <env name="MAIL_MAILER" value="array"/>
+        <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="SESSION_DRIVER" value="array"/>
+        <env name="PULSE_ENABLED" value="false"/>
+        <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="NIGHTWATCH_ENABLED" value="false"/>
+    </php>
+</phpunit>
