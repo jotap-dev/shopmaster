@@ -26,9 +26,11 @@ servers:
 tags:
   - name: Meta
     description: Informações da própria API
+  - name: Identity
+    description: |
+      Cadastro, autenticação e papéis de plataforma.
   # Uma tag por bounded context, com o mesmo nome de src/<Context>/.
   # Entram conforme as fases do plano:
-  # - name: Identity
   # - name: Store
   # - name: Catalog
   # - name: Inventory
@@ -40,6 +42,92 @@ tags:
   # - name: Review
 
 paths:
+  /v1/auth/register:
+    post:
+      tags: [Identity]
+      operationId: registerUser
+      summary: Cadastrar usuário
+      description: |
+        Cria uma conta e devolve o usuário recém-cadastrado.
+
+        O usuário **nasce com o papel `buyer`** (RF-001). Para vender, ele cria
+        uma loja depois — e é a criação da primeira loja que concede o papel
+        `seller`.
+
+        O e-mail é normalizado para minúsculas e é único na plataforma,
+        comparado **sem diferenciar maiúsculas** (RF-002): cadastrar
+        `Joao@x.com` depois de `joao@x.com` devolve `email_already_registered`.
+
+        Rota pública, limitada a 10 requisições por minuto por IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterUserRequest'
+            example:
+              name: Joao Pedro
+              email: joao@shopmaster.test
+              password: senha-forte-123
+      responses:
+        '201':
+          description: Conta criada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisteredUser'
+              example:
+                id: 01a07e54-50d3-7303-a621-87f6f746040b
+                name: Joao Pedro
+                email: joao.25989@shopmaster.test
+                roles: [buyer]
+                registered_at: '2026-09-08T00:04:10+00:00'
+        '422':
+          description: |
+            Entrada inválida ou e-mail já cadastrado. Distinguir pelo
+            `error.code`:
+
+            | `error.code` | Quando |
+            |---|---|
+            | `validation_failed` | Campo faltando, e-mail malformado, senha fora da política. Traz `error.fields`. |
+            | `email_already_registered` | Já existe conta com este e-mail. |
+            | `invalid_name` | Nome recusado pela invariante de domínio. |
+            | `invalid_email` | E-mail recusado pela invariante de domínio. |
+            | `invalid_password` | Senha recusada pela invariante de domínio. |
+
+            Os três últimos são a última linha de defesa: em uso normal, a
+            validação da requisição responde antes, com `validation_failed`.
+          content:
+            application/json:
+              schema:
+                # `anyOf`, não `oneOf`: a resposta de validação É um Error —
+                # mesma casca, com `fields` a mais. Os dois não são
+                # mutuamente exclusivos, e descrevê-los como se fossem
+                # mentiria sobre o formato.
+                anyOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
+              examples:
+                validacao:
+                  summary: Campos faltando
+                  value:
+                    error:
+                      code: validation_failed
+                      message: Os dados enviados sao invalidos.
+                      fields:
+                        name: ['The name field is required.']
+                        email: ['The email field is required.']
+                        password: ['The password field is required.']
+                duplicado:
+                  summary: E-mail já cadastrado
+                  value:
+                    error:
+                      code: email_already_registered
+                      message: "O e-mail 'joao@shopmaster.test' ja esta cadastrado."
+        '429':
+          description: Limite de requisições excedido (10 por minuto, por IP).
+
   /v1:
     get:
       tags: [Meta]
@@ -125,6 +213,88 @@ components:
           maxLength: 3
           description: Código ISO-4217.
           examples: [BRL]
+
+    RegisterUserRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Espaços das pontas e repetidos internamente são normalizados.
+          examples: ['Joao Pedro']
+        email:
+          type: string
+          format: email
+          maxLength: 255
+          description: Normalizado para minúsculas. Único na plataforma.
+          examples: ['joao@shopmaster.test']
+        password:
+          type: string
+          format: password
+          minLength: 8
+          description: |
+            Mínimo de 8 caracteres e máximo de **72 bytes** — não 72
+            caracteres. O limite é do bcrypt, que trunca em silêncio a partir
+            daí; um emoji ocupa 4 bytes.
+          examples: ['senha-forte-123']
+
+    RegisteredUser:
+      type: object
+      required: [id, name, email, roles, registered_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID versão 7 — ordenável no tempo.
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        roles:
+          type: array
+          description: |
+            Papéis de **plataforma**, acumuláveis. Papel de loja (`owner`,
+            `admin`, `finance`) não aparece aqui: é por loja e resolvido a
+            cada requisição.
+          items:
+            $ref: '#/components/schemas/PlatformRole'
+        registered_at:
+          type: string
+          format: date-time
+
+    PlatformRole:
+      type: string
+      enum: [buyer, seller, platform_admin]
+      description: |
+        `buyer` — comprador, papel de todo usuário no cadastro.
+        `seller` — dono de loja, concedido ao criar a primeira.
+        `platform_admin` — administração da plataforma.
+
+    ValidationError:
+      type: object
+      description: |
+        Mesma casca do `Error`, com o detalhe por campo. `fields` é acréscimo:
+        um cliente que só conheça `code` e `message` continua funcionando.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, fields]
+          properties:
+            code:
+              type: string
+              enum: [validation_failed]
+            message:
+              type: string
+            fields:
+              type: object
+              additionalProperties:
+                type: array
+                items:
+                  type: string
 
     Pagination:
       type: object

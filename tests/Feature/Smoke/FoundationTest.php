@@ -68,12 +68,21 @@ final class FoundationTest extends TestCase
         $this->assertSame('v1', $resposta->json('version'));
     }
 
-    public function test_erro_sob_v1_sai_em_json_e_nao_em_html(): void
+    public function test_erro_sob_v1_sai_em_json_no_formato_do_projeto(): void
     {
         $resposta = $this->get('/v1/rota-que-nao-existe');
 
-        $resposta->assertNotFound();
+        $resposta->assertNotFound()
+            ->assertJsonPath('error.code', 'not_found');
+
         $this->assertStringContainsString('application/json', (string) $resposta->headers->get('Content-Type'));
+    }
+
+    public function test_metodo_nao_permitido_tambem_respeita_o_formato_de_erro(): void
+    {
+        $this->putJson('/v1')
+            ->assertStatus(405)
+            ->assertJsonPath('error.code', 'method_not_allowed');
     }
 
     public function test_o_health_check_responde(): void

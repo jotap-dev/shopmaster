@@ -7,7 +7,7 @@ O mapa completo, com o diagrama e o padrão de cada relação, está em [plano-d
 | Contexto | Tipo | Responsabilidade | Status | Fase |
 |---|---|---|---|---|
 | **Shared** | Kernel | `EventBus`, `Money`, `Clock`, `ErrorResource`, `Auth` | **Parcial** — `EventBus`, `Money` e `Clock` prontos; `Auth` vem com Identity | 0 |
-| **Identity** | Genérico | Registro, login, refresh, papéis **de plataforma** | Esqueleto | 1 |
+| **Identity** | Genérico | Registro, login, refresh, papéis **de plataforma** | **Parcial** — cadastro (RF-001/002) pronto; falta login, refresh e o middleware `auth.token` | 1 |
 | **Customer** | Suporte | Dados do cliente, endereços, favoritos | Esqueleto | 1 e 3 |
 | **Store** | **Core** | Loja, membros, **papéis de loja**, aprovação, comissão | Esqueleto | 2 |
 | **Catalog** | **Core** | Produto **de uma loja**, variação (SKU global), categoria, busca | Esqueleto | 3 |
@@ -22,6 +22,19 @@ O mapa completo, com o diagrama e o padrão de cada relação, está em [plano-d
 | **ExampleContext** | — | Esqueleto de referência para o próximo contexto | Placeholder | — |
 
 "Esqueleto" = a árvore de pastas e o namespace PSR-4 existem; ainda não há código.
+
+### O que já existe no Identity
+
+| Camada | Classes |
+|---|---|
+| `Domain/` | `PersonName`, `EmailAddress`, `PlainPassword`, `HashedPassword`, `PlatformRole`, `NewUser`, `RegisteredUser` + as exceções de invariante |
+| `Application/` | `RegisterUser`; portas `UserRepository` e `PasswordHasher`; exceção `EmailAlreadyRegistered` |
+| `Infrastructure/` | `EloquentUserRepository`, `BcryptPasswordHasher` |
+| `Interface/Http/` | `RegisterUserController`, `RegisterUserRequest`, `RegisteredUserResource` |
+
+Tabelas: `users` (e-mail em `citext`, único) e `user_platform_roles`.
+
+**A regra "todo mundo nasce comprador" mora em `NewUser::register()`** — não no Controller, não num valor padrão de coluna, não num seeder. O dia em que o cadastro puder nascer com outro papel, muda um arquivo só.
 
 ## As fronteiras, e por que ficaram onde ficaram
 

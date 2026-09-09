@@ -19,6 +19,7 @@ Lista única do que precisa existir **fora do código** para a API funcionar em 
 | `REDIS_CLIENT` | Sim | Deve ser `predis`. Com `phpredis` (o default do Laravel) a aplicação quebra se a extensão não estiver compilada no servidor. |
 | `JWT_SECRET` | **Sim em servidor** | Cai na `APP_KEY` se ausente — funciona, mas amarra o ciclo de vida dos tokens ao da chave da aplicação: girar a `APP_KEY` deslogaria todo mundo sem aviso. Defina explicitamente. |
 | `APP_DEBUG` | Sim | Deve ser `false`. Com `true`, stack trace e variáveis de ambiente vazam na resposta de erro. |
+| `BCRYPT_ROUNDS` | Não, mas importa | Padrão 12, lido por `config/hashing.php`. É o custo do hash de senha, e a defesa contra ataque offline se o banco vazar. **Nunca use em produção o valor 4 do `phpunit.xml`** — ele existe só para a suíte não pagar ~100ms por teste. Baixá-lo não quebra nada visível: as senhas continuam funcionando, só ficam baratas de quebrar. |
 | `APP_URL` | Sim | Links absolutos (inclusive o do Swagger) saem errados. |
 
 ### Degradação silenciosa — o que **não** derruba a API, só desliga uma funcionalidade

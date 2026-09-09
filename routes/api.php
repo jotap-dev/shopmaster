@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Identity\Interface\Http\Controllers\RegisterUserController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -43,7 +44,13 @@ Route::prefix('v1')->group(function (): void {
     // -----------------------------------------------------------------
     // Identity — Fase 1
     // -----------------------------------------------------------------
-    // Route::post('/auth/register', [RegisterController::class, 'store']);
+
+    // RF-001 — cadastro. Aberta de propósito (é a porta de entrada), e por
+    // isso limitada por IP: sem o throttle, é onde alguém enumera e-mails
+    // cadastrados a partir do 422 de duplicidade (RNF-025).
+    Route::post('/auth/register', [RegisterUserController::class, 'store'])
+        ->middleware('throttle:10,1');
+
     // Route::post('/auth', [AuthController::class, 'store']);
     // Route::post('/auth/refresh', [AuthController::class, 'refresh']);
 

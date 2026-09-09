@@ -77,13 +77,14 @@ A superfície tem três famílias, separadas por **autorização**, não por for
 
 Hoje, no ar:
 
-| Rota | Auth | O quê |
-|---|---|---|
-| `GET /v1` | pública | Identificação da API |
-| `GET /up` | pública | Health check |
-| `GET /docs` | pública | Swagger UI |
+| Rota | Auth | Contexto | O quê |
+|---|---|---|---|
+| `POST /v1/auth/register` | pública | Identity | Cadastro (RF-001). Nasce com o papel `buyer` |
+| `GET /v1` | pública | — | Identificação da API |
+| `GET /up` | pública | — | Health check |
+| `GET /docs` | pública | — | Swagger UI |
 
-As rotas de negócio entram conforme as fases do plano. Contrato em [docs/openapi/openapi.yaml](docs/openapi/openapi.yaml), mantido à mão.
+As demais rotas entram conforme as fases do plano. Contrato em [docs/openapi/openapi.yaml](docs/openapi/openapi.yaml), mantido à mão.
 
 ## Stack
 
