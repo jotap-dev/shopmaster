@@ -50,6 +50,7 @@ final readonly class AuthenticateWithAccessToken
         }
 
         $this->container->instance(AuthenticatedUser::class, $usuario);
+        $request->attributes->set('auth.user_id', $usuario->id);
 
         return $next($request);
     }

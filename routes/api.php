@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Customer\Interface\Http\Controllers\MyAddressController;
+use Identity\Interface\Http\Controllers\AdminUserRolesController;
 use Identity\Interface\Http\Controllers\AuthController;
 use Identity\Interface\Http\Controllers\MyProfileController;
 use Identity\Interface\Http\Controllers\RegisterUserController;
@@ -80,6 +82,13 @@ Route::prefix('v1')->group(function (): void {
         // corpo: não há como apontar para a conta de outra pessoa.
         Route::get('/me', [MyProfileController::class, 'show']);
         Route::patch('/me', [MyProfileController::class, 'update']);
+
+        // RF-006 — agenda de endereços. O dono é o token; id alheio = 404.
+        Route::get('/me/addresses', [MyAddressController::class, 'index']);
+        Route::post('/me/addresses', [MyAddressController::class, 'store']);
+        Route::get('/me/addresses/{addressId}', [MyAddressController::class, 'show']);
+        Route::patch('/me/addresses/{addressId}', [MyAddressController::class, 'update']);
+        Route::delete('/me/addresses/{addressId}', [MyAddressController::class, 'destroy']);
     });
 
     // -----------------------------------------------------------------

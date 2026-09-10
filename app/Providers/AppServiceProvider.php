@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use Customer\Application\AddressRepository;
+use Customer\Infrastructure\Eloquent\EloquentAddressRepository;
 use Identity\Application\PasswordHasher;
 use Identity\Application\RefreshTokenBlacklist;
 use Identity\Application\TokenIssuer;
@@ -77,6 +79,14 @@ class AppServiceProvider extends ServiceProvider
         // padrão ressuscitaria todo refresh token já revogado.
         $this->app->bind(RefreshTokenBlacklist::class, fn (Application $app) => new RedisRefreshTokenBlacklist(
             $app->make('cache')->store('auth'),
+        ));
+
+        // -----------------------------------------------------------------
+        // Customer — Fase 1 (endereços) / Fase 3 (favoritos)
+        // -----------------------------------------------------------------
+
+        $this->app->bind(AddressRepository::class, fn (Application $app) => new EloquentAddressRepository(
+            $app->make(ConnectionResolverInterface::class),
         ));
 
         // -----------------------------------------------------------------

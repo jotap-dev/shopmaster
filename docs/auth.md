@@ -51,6 +51,8 @@ Nenhum contexto consulta `store_members` por conta própria. Mudar a regra de pa
 | `POST /v1/auth/refresh` | pública | Troca do refresh (RF-004) |
 | `GET /v1/auth/session` | Bearer | **O que este token me permite** — papéis inclusos |
 | `GET /v1/me` · `PATCH /v1/me` | Bearer | Minha conta (RF-005) — nome, contato e documento, **sem papéis** |
+| `GET/POST/PATCH/DELETE /v1/me/addresses[/{id}]` | Bearer | Agenda de endereços (RF-006) — Customer |
+| `PATCH /v1/admin/users/{id}/roles` | `platform_admin` | Conceder/revogar papéis (RF-007) |
 
 ### Por que os papéis só aparecem no `/session`
 

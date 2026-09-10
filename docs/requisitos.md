@@ -80,8 +80,8 @@ Conta e papéis · criar e gerir loja · membros da loja · produto com SKU glob
 | RF-003 ✅ | O usuário autentica por e-mail e senha e recebe um par access + refresh token. |
 | RF-004 ✅ | O refresh é de **uso único**: ao ser trocado, é revogado. |
 | RF-005 ✅ | O usuário edita nome, telefone e documento; **não** troca o e-mail no v1. |
-| RF-006 | O usuário mantém uma agenda de endereços, com um marcado como padrão. |
-| RF-007 | Um `platform_admin` concede e revoga papéis de plataforma de outro usuário. |
+| RF-006 ✅ | O usuário mantém uma agenda de endereços, com um marcado como padrão. |
+| RF-007 ✅ | Um `platform_admin` concede e revoga papéis de plataforma de outro usuário. |
 | RF-008 ✅ | Login errado devolve sempre o mesmo erro, seja o e-mail inexistente ou a senha errada. |
 
 **Decisões tomadas no RF-005**, que o requisito não fixava:
@@ -104,6 +104,25 @@ A unicidade está em duas camadas, e as duas são necessárias:
 | Coluna `citext` + `UNIQUE` | Compara e rejeita sem diferenciar caixa | Qualquer caminho que esqueça de normalizar — um `INSERT` no psql, uma rota futura — furaria a regra |
 
 O `existsByEmail()` do use case é cortesia (mensagem clara, e não gastar bcrypt à toa); **quem garante é a constraint**, e o adapter traduz a violação de volta para `EmailAlreadyRegistered`. Sem isso, dois cadastros simultâneos do mesmo e-mail passariam os dois pela verificação prévia.
+
+**Decisões tomadas no RF-006**, que o requisito não fixava:
+
+| Decisão | Escolha | Consequência |
+|---|---|---|
+| Tabela `customers` | **Não** | A conta já vive em `users`. Endereço aponta para `user_id`. Uma linha 1:1 seria JOIN sem ganho. |
+| Padrão automático | Primeiro endereço vira padrão | Agenda nunca começa sem padrão. |
+| Troca de padrão | `is_default: true` desmarca o anterior na mesma transação | Índice único parcial no Postgres é a segunda linha de defesa. |
+| Remover o padrão | Promove o mais antigo restante | Enquanto houver endereço, há padrão. |
+| CEP | Só dígitos, 8 posições | Máscara gravada faria o mesmo CEP virar várias linhas. |
+| UF | Enum fechado das 27 UFs | UF inventada é recusada. |
+
+**Decisões tomadas no RF-007**:
+
+| Decisão | Escolha | Consequência |
+|---|---|---|
+| Forma da API | `PATCH` com o conjunto **inteiro** de papéis | Concede o que falta e revoga o que sobrou; idempotente. |
+| Auto-rebaixamento | Proibido (`409 cannot_revoke_own_admin`) | Sem isso o último admin se tranca fora. |
+| Efeito no token | Só no próximo refresh | O middleware `role` lê o token (RULE 7), não o banco. |
 
 ### 4.2 Loja
 

@@ -24,7 +24,7 @@ Referência de padrão: o `participant-api` — a mesma arquitetura em camadas, 
 |---|---|---|---|
 | **Shared** | Kernel | `EventBus`, `Money`, `Clock`, `ErrorResource`, `Auth` | Parcial |
 | **Identity** | Genérico | Registro, login, refresh, papéis de plataforma | Esqueleto |
-| **Customer** | Suporte | Dados do cliente, endereços, favoritos | Esqueleto |
+| **Customer** | Suporte | Endereços salvos e favoritos | Parcial (endereços) |
 | **Store** | Core | Loja, membros, papéis de loja, aprovação, comissão | Esqueleto |
 | **Catalog** | Core | Produto de uma loja, variação (SKU global), categoria, busca | Esqueleto |
 | **Inventory** | Core | Saldo por SKU, reserva, baixa | Esqueleto |
@@ -85,6 +85,9 @@ Hoje, no ar:
 | `GET /v1/auth/session` | Bearer | Identity | Quem sou eu, segundo este token |
 | `GET /v1/me` | Bearer | Identity | Minha conta |
 | `PATCH /v1/me` | Bearer | Identity | Editar nome, telefone e documento (RF-005) |
+| `GET/POST /v1/me/addresses` | Bearer | Customer | Agenda de endereços (RF-006) |
+| `GET/PATCH/DELETE /v1/me/addresses/{id}` | Bearer | Customer | Detalhe / editar / remover endereço |
+| `PATCH /v1/admin/users/{id}/roles` | `platform_admin` | Identity | Conceder/revogar papéis (RF-007) |
 | `GET /v1` | pública | — | Identificação da API |
 | `GET /up` | pública | — | Health check |
 | `GET /docs` | pública | — | Swagger UI |

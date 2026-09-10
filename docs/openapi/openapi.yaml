@@ -29,6 +29,9 @@ tags:
   - name: Identity
     description: |
       Cadastro, autenticação e papéis de plataforma.
+  - name: Customer
+    description: |
+      Agenda de endereços do comprador (favoritos entram na Fase 3).
   # Uma tag por bounded context, com o mesmo nome de src/<Context>/.
   # Entram conforme as fases do plano:
   # - name: Store
@@ -324,6 +327,266 @@ paths:
                 anyOf:
                   - $ref: '#/components/schemas/ValidationError'
                   - $ref: '#/components/schemas/Error'
+
+  /v1/me/addresses:
+    get:
+      tags: [Customer]
+      operationId: listMyAddresses
+      summary: Listar meus endereços
+      description: |
+        Agenda do portador do token (RF-006). O padrão vem primeiro.
+      responses:
+        '200':
+          description: Lista (pode ser vazia).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Address'
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [Customer]
+      operationId: addMyAddress
+      summary: Adicionar endereço
+      description: |
+        Inclui um endereço na agenda. O **primeiro** da conta vira padrão
+        automaticamente. Pedir `is_default: true` num endereço seguinte
+        troca o padrão na mesma gravação.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreAddressRequest'
+            example:
+              label: Casa
+              recipient_name: Joao Pedro
+              street: Av Paulista
+              number: '1000'
+              neighborhood: Bela Vista
+              city: Sao Paulo
+              state: SP
+              postal_code: 01310-100
+      responses:
+        '201':
+          description: Endereço criado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: |
+            | `error.code` | Quando |
+            |---|---|
+            | `validation_failed` | Campo faltando ou UF fora do enum. Traz `error.fields`. |
+            | `invalid_postal_code` | CEP sem 8 dígitos. |
+            | `invalid_address` | Campo obrigatório vazio ou longo demais. |
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
+
+  /v1/me/addresses/{addressId}:
+    parameters:
+      - name: addressId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Customer]
+      operationId: getMyAddress
+      summary: Detalhe de um endereço
+      description: |
+        Endereço da própria agenda. Id de outra pessoa devolve o mesmo 404
+        de inexistente — 403 confirmaria que o id é válido.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Não existe, ou não é do portador do token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags: [Customer]
+      operationId: updateMyAddress
+      summary: Editar endereço
+      description: |
+        Parcial. `is_default: true` troca o padrão. `label` ou `complement`
+        com `null` remove o campo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAddressRequest'
+            example:
+              is_default: true
+      responses:
+        '200':
+          description: Endereço atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Não existe, ou não é do portador do token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: |
+            `validation_failed`, `invalid_postal_code` ou `invalid_address`.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Customer]
+      operationId: removeMyAddress
+      summary: Remover endereço
+      description: |
+        Se o removido era o padrão e ainda restam outros, o mais antigo
+        restante vira o novo padrão — a agenda nunca fica sem padrão enquanto
+        houver endereço.
+      responses:
+        '204':
+          description: Removido.
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Não existe, ou não é do portador do token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/admin/users/{userId}/roles:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [Identity]
+      operationId: setPlatformRoles
+      summary: Definir papéis de plataforma
+      description: |
+        Substitui o conjunto inteiro de papéis do usuário (RF-007). Concede o
+        que falta e revoga o que sobrou. Idempotente: reenviar a mesma lista
+        não é erro.
+
+        Protegida por `auth.token` + `role:platform_admin`. O efeito no token
+        do **alvo** só aparece no próximo refresh — o middleware lê o token,
+        não o banco.
+
+        Um `platform_admin` **não pode revogar o próprio papel** (`409
+        cannot_revoke_own_admin`): sem isso a plataforma fica sem quem
+        conceda de novo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePlatformRolesRequest'
+            example:
+              roles: [buyer, seller, platform_admin]
+      responses:
+        '200':
+          description: Papéis atualizados.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserIdentity'
+              example:
+                id: 01a07e54-50d3-7303-a621-87f6f746040b
+                name: Maria
+                email: maria@shopmaster.test
+                roles: [buyer, platform_admin, seller]
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: |
+            `forbidden` — o portador não tem `platform_admin` **neste token**.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: forbidden
+                  message: Voce nao tem permissao para esta acao.
+        '404':
+          description: Usuário alvo não existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            `cannot_revoke_own_admin` — tentativa de se rebaixar.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: |
+            `validation_failed` — lista vazia, papel fora do enum, ou `roles`
+            ausente. Traz `error.fields`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
 
   /v1/auth/register:
     post:
