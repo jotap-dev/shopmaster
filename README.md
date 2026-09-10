@@ -127,6 +127,8 @@ colima start
 docker compose up -d --build && docker compose exec app php artisan migrate
 ```
 
+A API sobe em `http://localhost:8001` e a documentação em `/docs`. A porta é 8001 e não 8000 porque esta última é disputada demais; trocar é `APP_PORT=9005 docker compose up -d`.
+
 O Postgres e o Redis **não** são containers — o app conecta nos do host. Detalhes e a variante com serviços containerizados em [docs/docker.md](docs/docker.md).
 
 ### Nativo
@@ -136,8 +138,10 @@ composer install && cp .env.example .env && php artisan key:generate
 ```
 
 ```bash
-php artisan migrate && php artisan serve
+php artisan migrate && composer dev
 ```
+
+O `composer dev` usa a mesma porta do Docker (8001), para o `APP_URL` valer nos dois modos.
 
 ## Comandos
 

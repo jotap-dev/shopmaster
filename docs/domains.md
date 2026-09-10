@@ -7,8 +7,8 @@ O mapa completo, com o diagrama e o padrão de cada relação, está em [plano-d
 | Contexto | Tipo | Responsabilidade | Status | Fase |
 |---|---|---|---|---|
 | **Shared** | Kernel | `EventBus`, `Money`, `Clock`, `ErrorResource`, `Auth` | **Parcial** — `EventBus`, `Money` e `Clock` prontos; `Auth` vem com Identity | 0 |
-| **Identity** | Genérico | Registro, login, refresh, minha conta, papéis **de plataforma** | **Parcial** — cadastro, login, refresh, `auth.token` e "minha conta" prontos; falta o middleware `role` (RF-007) | 1 |
-| **Customer** | Suporte | Endereços salvos e favoritos | Esqueleto | 1 e 3 |
+| **Identity** | Genérico | Registro, login, refresh, minha conta, papéis **de plataforma** | **Parcial** — cadastro, login, refresh, `auth.token`, `role`, "minha conta" e gestão de papéis prontos | 1 |
+| **Customer** | Suporte | Endereços salvos e favoritos | **Parcial** — agenda de endereços (RF-006) pronta; favoritos na Fase 3 | 1 e 3 |
 | **Store** | **Core** | Loja, membros, **papéis de loja**, aprovação, comissão | Esqueleto | 2 |
 | **Catalog** | **Core** | Produto **de uma loja**, variação (SKU global), categoria, busca | Esqueleto | 3 |
 | **Inventory** | **Core** | Saldo por SKU, reserva, baixa, devolução | Esqueleto | 4 |

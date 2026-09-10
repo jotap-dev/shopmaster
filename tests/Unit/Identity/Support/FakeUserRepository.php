@@ -98,6 +98,13 @@ final class FakeUserRepository implements UserRepository
         throw new LogicException('not needed by this test');
     }
 
+    public function replacePlatformRoles(string $userId, array $roles): UserIdentity
+    {
+        $this->roles = $roles;
+
+        return $this->identidade();
+    }
+
     private function identidade(): UserIdentity
     {
         return new UserIdentity(

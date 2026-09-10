@@ -147,6 +147,11 @@ final class RegisterUserTest extends TestCase
             {
                 throw new LogicException('not needed by this test');
             }
+
+            public function replacePlatformRoles(string $userId, array $roles): UserIdentity
+            {
+                throw new LogicException('not needed by this test');
+            }
         };
 
         (new RegisterUser($repositorio, $this->hasher()))
@@ -232,6 +237,11 @@ final class RegisterUserTest extends TestCase
             }
 
             public function updateProfile(string $id, ProfileChanges $changes): UserProfile
+            {
+                throw new LogicException('not needed by this test');
+            }
+
+            public function replacePlatformRoles(string $userId, array $roles): UserIdentity
             {
                 throw new LogicException('not needed by this test');
             }

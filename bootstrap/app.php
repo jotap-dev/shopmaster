@@ -1,6 +1,7 @@
 <?php
 
 use Identity\Interface\Http\Middleware\AuthenticateWithAccessToken;
+use Identity\Interface\Http\Middleware\RequirePlatformRole;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -23,8 +24,9 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             // Autenticação por access token. O papel de PLATAFORMA viaja
-            // no token; o middleware `role` (RF-007) ainda não existe.
+            // no token; a guarda `role` lê esses claims (RF-007).
             'auth.token' => AuthenticateWithAccessToken::class,
+            'role' => RequirePlatformRole::class,
 
             // Fase 2 (Store) — papel de LOJA, resolvido por requisição a
             // partir do {storeId} da rota. Não está no token de propósito:

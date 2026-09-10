@@ -128,10 +128,14 @@ Route::prefix('v1')->group(function (): void {
     // });
 
     // -----------------------------------------------------------------
-    // Plataforma
+    // Plataforma — RF-007
     // -----------------------------------------------------------------
-    // Route::prefix('admin')->middleware(['auth.token', 'role:platform_admin'])->group(function (): void {
-    //     Route::post('/stores/{storeId}/approve', [AdminStoreController::class, 'approve']);
-    //     Route::post('/categories', [AdminCategoryController::class, 'store']);
-    // });
+    Route::prefix('admin')->middleware(['auth.token', 'role:platform_admin', 'throttle:60,1'])->group(function (): void {
+        // Substitui o conjunto de papéis. O access token do alvo só reflete
+        // a mudança no próximo refresh — o middleware lê o token, não o banco.
+        Route::patch('/users/{userId}/roles', [AdminUserRolesController::class, 'update']);
+
+        // Route::post('/stores/{storeId}/approve', [AdminStoreController::class, 'approve']);
+        // Route::post('/categories', [AdminCategoryController::class, 'store']);
+    });
 });

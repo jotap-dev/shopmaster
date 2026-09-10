@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Identity\Infrastructure\Eloquent;
 
 use DateTimeImmutable;
+use Identity\Application\AuthUserNotFound;
 use Identity\Application\DocumentAlreadyInUse;
 use Identity\Application\EmailAlreadyRegistered;
 use Identity\Application\ProfileNotFound;
@@ -252,6 +253,29 @@ final readonly class EloquentUserRepository implements UserRepository
         }
 
         return $this->findProfileById($id) ?? throw ProfileNotFound::create();
+    }
+
+    public function replacePlatformRoles(string $userId, array $roles): UserIdentity
+    {
+        $this->db()->transaction(function () use ($userId, $roles): void {
+            $this->db()->table('user_platform_roles')->where('user_id', $userId)->delete();
+
+            if ($roles === []) {
+                return;
+            }
+
+            $agora = new DateTimeImmutable;
+            $this->db()->table('user_platform_roles')->insert(array_map(
+                static fn (PlatformRole $papel): array => [
+                    'user_id' => $userId,
+                    'role' => $papel->value,
+                    'granted_at' => $agora,
+                ],
+                $roles,
+            ));
+        });
+
+        return $this->findIdentityById($userId) ?? throw AuthUserNotFound::create();
     }
 
     private static function pareceUuid(string $id): bool

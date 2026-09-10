@@ -1,6 +1,6 @@
 # Autenticação
 
-> **Status: implementado.** Cadastro (RF-001/002), login (RF-003), refresh de uso único (RF-004) e o middleware `auth.token` estão no ar e cobertos por testes. Falta o middleware `role` (RF-007), para papéis de plataforma em rota administrativa.
+> **Status: implementado.** Cadastro (RF-001/002), login (RF-003), refresh de uso único (RF-004), o middleware `auth.token`, "minha conta" (RF-005) e a gestão de papéis com middleware `role` (RF-007) estão no ar e cobertos por testes.
 
 JWT HS256 assinado na própria aplicação, sem dependência externa e sem par de chaves para rotacionar. Configuração em `config/jwt.php`.
 
@@ -138,6 +138,12 @@ Nem a senha em texto puro nem o hash saem do repositório: `PlainPassword` e `Ha
 Exige `Authorization: Bearer <access token>`. Resolve o usuário **sem tocar no banco** — identidade e papéis vêm dos claims assinados — e o registra no container da requisição, de onde qualquer controller o recebe por injeção de `AuthenticatedUser`.
 
 O 401 vai com `WWW-Authenticate: Bearer`, como a RFC 9110 exige, e separa `expired_token` de `invalid_token`: o cliente precisa saber quando basta usar o refresh e quando é caso de refazer o login. Não há vazamento nisso — o `exp` está no payload, que o portador pode ler.
+
+## O middleware `role`
+
+`role:platform_admin` (e variações) lê o papel **do token**, não do banco. Conceder `platform_admin` a alguém grava na hora, mas a rota `/v1/admin/...` só libera depois do próximo refresh — ou de um login novo. É a contrapartida da RULE 7: autorização de plataforma é stateless.
+
+`PATCH /v1/admin/users/{id}/roles` substitui o conjunto inteiro. Um admin **não pode revogar o próprio** `platform_admin` (`409 cannot_revoke_own_admin`): sem isso a plataforma fica sem quem conceda de novo.
 
 ## Recurso de outro cliente, ou de outra loja
 

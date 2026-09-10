@@ -82,4 +82,9 @@ final class FakeProfileRepository implements UserRepository
     {
         throw new LogicException('not needed by this test');
     }
+
+    public function replacePlatformRoles(string $userId, array $roles): UserIdentity
+    {
+        throw new LogicException('not needed by this test');
+    }
 }

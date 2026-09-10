@@ -7,6 +7,7 @@ namespace Identity\Application;
 use Identity\Domain\Document;
 use Identity\Domain\EmailAddress;
 use Identity\Domain\NewUser;
+use Identity\Domain\PlatformRole;
 use Identity\Domain\ProfileChanges;
 use Identity\Domain\RegisteredUser;
 use Identity\Domain\UserCredentials;
@@ -54,4 +55,14 @@ interface UserRepository
      * garante é a constraint do banco, e traduzi-la é do adapter.
      */
     public function updateProfile(string $id, ProfileChanges $changes): UserProfile;
+
+    /**
+     * Substitui o conjunto inteiro de papéis de plataforma (RF-007).
+     *
+     * Roda numa transação: apaga os atuais e grava os novos. Quem garante
+     * que o usuário existe é o use case — o adapter só escreve.
+     *
+     * @param  list<PlatformRole>  $roles
+     */
+    public function replacePlatformRoles(string $userId, array $roles): UserIdentity;
 }
