@@ -55,6 +55,7 @@
         <env name="REDIS_CATALOG_DB" value="15"/>
         <env name="REDIS_CART_DB" value="14"/>
         <env name="REDIS_RESERVATIONS_DB" value="13"/>
+        <env name="REDIS_AUTH_DB" value="11"/>
 
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>

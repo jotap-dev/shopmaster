@@ -194,6 +194,11 @@ final class RegisterUserTest extends TestCase
 
                 return HashedPassword::fromHash('hash-de:'.$plain->value());
             }
+
+            public function verify(PlainPassword $plain, ?HashedPassword $hashed): bool
+            {
+                throw new LogicException('not needed by this test');
+            }
         };
     }
 }

@@ -5,13 +5,18 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use Identity\Application\PasswordHasher;
+use Identity\Application\RefreshTokenBlacklist;
+use Identity\Application\TokenIssuer;
 use Identity\Application\UserRepository;
+use Identity\Infrastructure\Cache\RedisRefreshTokenBlacklist;
 use Identity\Infrastructure\Eloquent\EloquentUserRepository;
 use Identity\Infrastructure\Hashing\BcryptPasswordHasher;
+use Identity\Infrastructure\Jwt\HmacJwtTokenIssuer;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\ConnectionResolverInterface;
 use Illuminate\Hashing\BcryptHasher;
 use Illuminate\Support\ServiceProvider;
+use Psr\Log\LoggerInterface;
 use Shared\Clock;
 use Shared\EventBus;
 use Shared\NullEventBus;
@@ -49,6 +54,7 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->bind(UserRepository::class, fn (Application $app) => new EloquentUserRepository(
             $app->make(ConnectionResolverInterface::class),
+            $app->make(LoggerInterface::class),
         ));
 
         // O hasher é construído à mão, com o custo lido da config, em vez de
@@ -59,8 +65,19 @@ class AppServiceProvider extends ServiceProvider
             new BcryptHasher(['rounds' => (int) config('hashing.bcrypt.rounds', 12)]),
         ));
 
-        // Ainda por implementar nesta fase: TokenIssuer (login/refresh),
-        // RefreshTokenBlacklist e o middleware auth.token.
+        $this->app->bind(TokenIssuer::class, fn (Application $app) => new HmacJwtTokenIssuer(
+            secret: (string) config('jwt.secret'),
+            issuer: (string) config('jwt.issuer'),
+            accessTokenTtlInSeconds: (int) config('jwt.ttl'),
+            refreshTokenTtlInSeconds: (int) config('jwt.refresh_ttl'),
+            clock: $app->make(Clock::class),
+        ));
+
+        // Store `auth` e não o padrão: um `cache:clear` de rotina no store
+        // padrão ressuscitaria todo refresh token já revogado.
+        $this->app->bind(RefreshTokenBlacklist::class, fn (Application $app) => new RedisRefreshTokenBlacklist(
+            $app->make('cache')->store('auth'),
+        ));
 
         // -----------------------------------------------------------------
         // Catalog — Fase 2

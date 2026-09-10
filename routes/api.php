@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
+use Identity\Interface\Http\Controllers\AuthController;
+use Identity\Interface\Http\Controllers\MyProfileController;
 use Identity\Interface\Http\Controllers\RegisterUserController;
+use Identity\Interface\Http\Controllers\SessionController;
 use Illuminate\Support\Facades\Route;
 
 /*

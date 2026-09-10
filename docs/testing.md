@@ -86,6 +86,14 @@ Escrita em serviço externo (gateway de pagamento, transportadora) **nunca** aco
 php artisan test --testsuite=Architecture
 ```
 
+## Armadilhas já encontradas
+
+- **`sometimes` desliga o `required_with`.** `['sometimes', 'required_with:outro']` só aplica as regras se o campo **vier** — e o caso a pegar é justamente o campo que faltou. Use `required_with` sozinho: ele já se comporta como opcional quando nenhum dos dois é enviado.
+- **`@dataProvider` em docblock não vale no PHPUnit 12.** É o atributo `#[DataProvider('nome')]`.
+- **Não redefina helpers do TestCase do Laravel.** `patchJson` já existe e é público; redeclarar como privado dá erro fatal de carregamento, antes de qualquer teste rodar.
+- **Enum não pode ser chave de array em PHP.** Use lista de pares e desestruture no `foreach`.
+- **Porta que ganha método quebra todo fake existente.** É por projeto: adicione o método nos fakes lançando `LogicException('not needed by this test')`, e o teste que precisar dele implementa de verdade.
+
 ## Verificação fora da suíte
 
 Feature test roda com variáveis próprias (`phpunit.xml`) e **pode mascarar bug de ambiente**. Antes de dar uma feature por pronta, bata no endpoint de verdade com `curl`.

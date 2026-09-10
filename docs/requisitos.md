@@ -67,18 +67,43 @@ Conta e papéis · criar e gerir loja · membros da loja · produto com SKU glob
 
 ## 4. Requisitos funcionais
 
+> **Legenda.** ✅ = implementado **e coberto por teste**. Sem marca = ainda não
+> existe. Um requisito só ganha a marca quando passa pelo fechamento da skill
+> `criar-feature`: suíte verde, Swagger atualizado e docs fechadas.
+
 ### 4.1 Identidade e conta
 
 | # | Requisito |
 |---|---|
-| RF-001 | O visitante se cadastra com nome, e-mail e senha, e nasce com o papel `buyer`. |
-| RF-002 | O e-mail é único na plataforma, comparado sem diferenciar maiúsculas (`citext`). |
-| RF-003 | O usuário autentica por e-mail e senha e recebe um par access + refresh token. |
-| RF-004 | O refresh é de **uso único**: ao ser trocado, é revogado. |
-| RF-005 | O usuário edita nome, telefone e documento; **não** troca o e-mail no v1. |
+| RF-001 ✅ | O visitante se cadastra com nome, e-mail e senha, e nasce com o papel `buyer`. |
+| RF-002 ✅ | O e-mail é único na plataforma, comparado sem diferenciar maiúsculas (`citext`). |
+| RF-003 ✅ | O usuário autentica por e-mail e senha e recebe um par access + refresh token. |
+| RF-004 ✅ | O refresh é de **uso único**: ao ser trocado, é revogado. |
+| RF-005 ✅ | O usuário edita nome, telefone e documento; **não** troca o e-mail no v1. |
 | RF-006 | O usuário mantém uma agenda de endereços, com um marcado como padrão. |
 | RF-007 | Um `platform_admin` concede e revoga papéis de plataforma de outro usuário. |
-| RF-008 | Login errado devolve sempre o mesmo erro, seja o e-mail inexistente ou a senha errada. |
+| RF-008 ✅ | Login errado devolve sempre o mesmo erro, seja o e-mail inexistente ou a senha errada. |
+
+**Decisões tomadas no RF-005**, que o requisito não fixava:
+
+| Decisão | Escolha | Consequência |
+|---|---|---|
+| Unicidade do documento | `UNIQUE (document_type, document)` | Um CPF pertence a uma pessoa. Compor com o tipo evita colisão entre valores iguais de tipos diferentes; no Postgres, contas sem documento não colidem porque `NULL`s são distintos. |
+| Alterar documento | **Só define uma vez** | Trocar CPF é o padrão de quem reaproveita conta para outra identidade. Reenviar o **mesmo** valor é aceito, para o PATCH seguir idempotente. |
+| Telefone | Só Brasil, DDD validado | DDD inexistente é recusado: telefone que ninguém disca é pior que campo vazio, porque dá impressão de contato. |
+| Tipos aceitos | **CPF, CNH e CNPJ** | Os três têm dígito verificador conferido. Passaporte foi deliberadamente deixado de fora: não tem checksum — nem o brasileiro, nem os estrangeiros —, e aceitá-lo daria aparência de verificação a um campo que ninguém consegue verificar. |
+| Formato do CNPJ | **Alfanumérico** (IN RFB 2.229/2024) | 12 posições alfanuméricas + 2 dígitos verificadores numéricos, com conversão ASCII−48. É superconjunto do formato antigo: todo CNPJ numérico já emitido continua válido pelo mesmo cálculo. |
+
+**RF-001 e RF-002 saíram juntos**, em `POST /v1/auth/register`. Não por conveniência: não existe "cadastro com e-mail" sem decidir o que torna um e-mail duplicado, então separar os dois só produziria uma entrega pela metade.
+
+A unicidade está em duas camadas, e as duas são necessárias:
+
+| Camada | O que faz | O que acontece sem ela |
+|---|---|---|
+| VO `EmailAddress` | Normaliza para minúsculas antes de gravar | O mesmo endereço viraria linhas diferentes conforme a digitação |
+| Coluna `citext` + `UNIQUE` | Compara e rejeita sem diferenciar caixa | Qualquer caminho que esqueça de normalizar — um `INSERT` no psql, uma rota futura — furaria a regra |
+
+O `existsByEmail()` do use case é cortesia (mensagem clara, e não gastar bcrypt à toa); **quem garante é a constraint**, e o adapter traduz a violação de volta para `EmailAlreadyRegistered`. Sem isso, dois cadastros simultâneos do mesmo e-mail passariam os dois pela verificação prévia.
 
 ### 4.2 Loja
 

@@ -50,6 +50,7 @@ docker compose --profile worker up -d
 - **`vendor/` é um volume anônimo.** O bind mount `.:/app` esconderia o `vendor/` instalado na imagem; o `- /app/vendor` do compose protege ele. Se você instalar uma dependência nova, reconstrua: `docker compose up -d --build`.
 - **`host.docker.internal` no Linux.** Não resolve sozinho; o `extra_hosts` do compose resolve isso. No Colima ele aponta para o mesmo IP, então declarar é seguro nas duas plataformas.
 - **Postgres precisa aceitar conexão do container.** Se o Postgres do host escuta só em `localhost`, o container não alcança. Ajuste `listen_addresses` e o `pg_hba.conf`, ou use a variante containerizada abaixo.
+- **Um DB do Redis por uso.** `0` locks, `1` cache, `2` catálogo, `3` carrinho, `4` reservas, `5` fila, `6` revogação de refresh token. Não é preciosismo: apontar dois usos para o mesmo DB faz um `cache:clear` derrubar o outro.
 - **Redis é falado por `predis`** (PHP puro), não pela extensão `phpredis` — por isso o Dockerfile não compila `phpredis`. `REDIS_CLIENT=predis` no `.env` é obrigatório.
 
 ## Variante: serviços em container

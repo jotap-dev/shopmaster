@@ -39,6 +39,16 @@ return [
             'serialize' => false,
         ],
 
+        // Revogação de refresh token (RF-004) — DB próprio no Redis.
+        // Isolado porque um `cache:clear` de rotina no store padrão
+        // ressuscitaria todo refresh token já queimado, e ninguém ligaria os
+        // dois fatos. O TTL de cada entrada é o prazo do próprio token.
+        'auth' => [
+            'driver' => 'redis',
+            'connection' => 'auth',
+            'lock_connection' => 'default',
+        ],
+
         // Store dedicado do catálogo publicado — DB próprio no Redis, ver
         // config/database.php. Isolado para que um `cache:clear` do app não
         // esvazie o catálogo inteiro, e vice-versa. TTL em config/shopmaster.php.

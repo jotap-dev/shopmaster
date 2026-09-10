@@ -80,6 +80,11 @@ Hoje, no ar:
 | Rota | Auth | Contexto | O quê |
 |---|---|---|---|
 | `POST /v1/auth/register` | pública | Identity | Cadastro (RF-001). Nasce com o papel `buyer` |
+| `POST /v1/auth` | pública | Identity | Login (RF-003) → access + refresh token |
+| `POST /v1/auth/refresh` | pública | Identity | Troca do refresh, de uso único (RF-004) |
+| `GET /v1/auth/session` | Bearer | Identity | Quem sou eu, segundo este token |
+| `GET /v1/me` | Bearer | Identity | Minha conta |
+| `PATCH /v1/me` | Bearer | Identity | Editar nome, telefone e documento (RF-005) |
 | `GET /v1` | pública | — | Identificação da API |
 | `GET /up` | pública | — | Health check |
 | `GET /docs` | pública | — | Swagger UI |

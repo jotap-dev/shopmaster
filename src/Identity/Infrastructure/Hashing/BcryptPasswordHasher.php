@@ -25,4 +25,24 @@ final readonly class BcryptPasswordHasher implements PasswordHasher
     {
         return HashedPassword::fromHash($this->hasher->make($plain->value()));
     }
+
+    public function verify(PlainPassword $plain, ?HashedPassword $hashed): bool
+    {
+        if ($hashed === null) {
+            // Sem usuário, ainda assim queima o tempo de um bcrypt completo.
+            //
+            // Sem isto, "e-mail não existe" responde em microssegundos e
+            // "senha errada" em ~100ms — e um cronômetro separa os dois casos
+            // que o RF-008 faz questão de não distinguir na mensagem.
+            //
+            // É `make()` e não um hash fixo de constante porque assim o custo
+            // acompanha sozinho o BCRYPT_ROUNDS configurado; um hash fixo
+            // gravado com outro custo desequilibraria os tempos de novo.
+            $this->hasher->make($plain->value());
+
+            return false;
+        }
+
+        return $this->hasher->check($plain->value(), $hashed->value());
+    }
 }

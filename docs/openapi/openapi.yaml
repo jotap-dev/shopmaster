@@ -214,6 +214,164 @@ components:
           description: Código ISO-4217.
           examples: [BRL]
 
+    DocumentType:
+      type: string
+      enum: [cpf, cnh, cnpj]
+      description: |
+        O tipo decide **como** o valor é validado — e um CPF e uma CNH têm os
+        dois 11 dígitos, então adivinhar pelo formato seria ambíguo.
+
+        Os três têm dígito verificador conferido.
+
+        O **CNPJ** segue o formato alfanumérico da IN RFB 2.229/2024: 12
+        posições alfanuméricas de base + 2 dígitos verificadores, que
+        continuam sempre numéricos. É superconjunto do formato antigo — todo
+        CNPJ numérico já emitido continua válido pelo mesmo cálculo.
+
+        Passaporte **não** é aceito, de propósito: não tem checksum, nem o
+        brasileiro nem os estrangeiros. Aceitá-lo daria aparência de
+        verificação a um campo que ninguém consegue verificar.
+
+    Document:
+      type: object
+      required: [type, value]
+      properties:
+        type:
+          $ref: '#/components/schemas/DocumentType'
+        value:
+          type: string
+          description: Normalizado — só dígitos para CPF/CNH, maiúsculas sem máscara para CNPJ.
+          examples: ['52998224725', 'AB12CD34EFGH83']
+
+    UserProfile:
+      type: object
+      description: |
+        A conta como o **dono** dela a vê. O documento aparece por inteiro
+        porque quem pede é o titular. Nunca reaproveite este formato em rota
+        de terceiro — CPF é dado sensível.
+
+        **Não traz `roles`.** Papel é autorização, não perfil: o banco pode já
+        ter um papel que o token ainda não tem, e devolvê-lo aqui prometeria
+        uma permissão que o middleware vai recusar. Para saber o que o
+        portador pode fazer **agora**, use `GET /v1/auth/session`.
+      required: [id, name, email, phone, phone_formatted, document]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: [string, 'null']
+          description: Só dígitos, DDD incluído.
+          examples: ['11988887777']
+        phone_formatted:
+          type: [string, 'null']
+          examples: ['(11) 98888-7777']
+        document:
+          oneOf:
+            - $ref: '#/components/schemas/Document'
+            - type: 'null'
+
+    UpdateProfileRequest:
+      type: object
+      description: |
+        Parcial — o que não for enviado não é alterado. Corpo vazio é aceito e
+        devolve o perfil inalterado, para o cliente que reenvia o formulário
+        sem mudanças não precisar tratar um erro.
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        phone:
+          type: [string, 'null']
+          description: |
+            Aceita máscara e `+55`; é normalizado para só dígitos.
+
+            Três estados: **omitir** não mexe, **um valor** substitui, e
+            **`null` explícito remove** o telefone da conta (RFC 7396).
+          examples: ['(11) 98888-7777']
+        document:
+          type: string
+          description: Obrigatório junto de `document_type`. Imutável depois de definido.
+          examples: ['529.982.247-25']
+        document_type:
+          $ref: '#/components/schemas/DocumentType'
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          examples: ['joao@shopmaster.test']
+        password:
+          type: string
+          format: password
+          examples: ['senha-forte-123']
+
+    RefreshTokenRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          description: O refresh token devolvido pelo login ou pela troca anterior.
+
+    AuthSession:
+      type: object
+      description: O resultado de um login ou de uma troca de refresh — o mesmo formato nos dois.
+      required: [access_token, refresh_token, token_type, expires_in, user]
+      properties:
+        access_token:
+          type: string
+          description: 'JWT HS256. Vai no cabeçalho `Authorization: Bearer <token>`.'
+        refresh_token:
+          type: string
+          description: JWT HS256 de **uso único**. Serve só para `POST /v1/auth/refresh`.
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          description: Vida do **access** token, em segundos.
+          examples: [3600]
+        user:
+          type: object
+          required: [id, name, email, roles]
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+            email:
+              type: string
+              format: email
+            roles:
+              type: array
+              items:
+                $ref: '#/components/schemas/PlatformRole'
+
+    AuthenticatedUser:
+      type: object
+      description: O portador do token, montado a partir dos claims assinados.
+      required: [id, email, roles]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformRole'
+
     RegisterUserRequest:
       type: object
       required: [name, email, password]

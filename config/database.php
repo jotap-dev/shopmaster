@@ -194,6 +194,7 @@ return [
         |   3  cart           carrinho de visitante (TTL)
         |   4  reservations   reserva de estoque (TTL curto)
         |   5  queue          fila de e-mail e webhook
+        |   6  auth           revogação de refresh token (RF-004)
         |  15  (reservado)    a suíte de testes — ver phpunit.xml
         |
         */
@@ -223,6 +224,15 @@ return [
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
             'database' => env('REDIS_RESERVATIONS_DB', '4'),
+        ],
+
+        'auth' => [
+            'url' => env('REDIS_URL'),
+            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'username' => env('REDIS_USERNAME'),
+            'password' => env('REDIS_PASSWORD'),
+            'port' => env('REDIS_PORT', '6379'),
+            'database' => env('REDIS_AUTH_DB', '6'),
         ],
 
         'queue' => [
