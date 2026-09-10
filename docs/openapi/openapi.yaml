@@ -42,6 +42,289 @@ tags:
   # - name: Review
 
 paths:
+  /v1/auth:
+    post:
+      tags: [Identity]
+      operationId: authenticate
+      summary: Autenticar
+      description: |
+        Troca e-mail e senha por um par de tokens (RF-003).
+
+        O e-mail é comparado sem diferenciar maiúsculas.
+
+        **Toda falha de credencial devolve exatamente a mesma resposta**
+        (RF-008): e-mail inexistente, e-mail malformado, senha errada — tudo
+        vira `401 invalid_credentials`, com a mesma mensagem. Distinguir
+        qualquer um deles transformaria esta rota num verificador de
+        "esta conta existe?".
+
+        Rota pública, limitada a 10 requisições por minuto por IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: joao@shopmaster.test
+              password: senha-forte-123
+      responses:
+        '200':
+          description: Autenticado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '401':
+          description: Credenciais inválidas — `error.code` é sempre `invalid_credentials`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: invalid_credentials
+                  message: Credenciais invalidas.
+        '422':
+          description: '`email` ou `password` ausentes. `error.code` é `validation_failed`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '429':
+          description: Limite de requisições excedido (10 por minuto, por IP).
+
+  /v1/auth/refresh:
+    post:
+      tags: [Identity]
+      operationId: refreshSession
+      summary: Renovar a sessão
+      description: |
+        Troca o refresh token por um **par novo** (RF-004).
+
+        O refresh é de **uso único**: ao ser trocado, é revogado. Um refresh
+        roubado só serve uma vez — e, se o dono legítimo usar o dele primeiro,
+        o do atacante recebe `refresh_token_already_used`, que é o sinal de
+        que houve vazamento.
+
+        O access token anterior **continua válido** até expirar: só o refresh
+        é revogável. É por isso que o TTL do access é curto.
+
+        Os papéis de plataforma são recarregados do banco nesta troca — é o
+        momento em que uma mudança de papel passa a valer.
+
+        Rota pública, limitada a 30 requisições por minuto por IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Par novo emitido; o refresh enviado foi revogado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '401':
+          description: |
+            | `error.code` | Quando | O que o cliente faz |
+            |---|---|---|
+            | `refresh_token_already_used` | O refresh já foi trocado antes | Refazer o login |
+            | `expired_token` | Passou dos 30 dias | Refazer o login |
+            | `invalid_token` | Malformado, assinatura errada, tipo errado (um access no lugar do refresh), ou conta removida | Refazer o login |
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                jaUsado:
+                  summary: Refresh já trocado
+                  value:
+                    error:
+                      code: refresh_token_already_used
+                      message: Este refresh token ja foi usado.
+                invalido:
+                  summary: Token inválido
+                  value:
+                    error:
+                      code: invalid_token
+                      message: Token invalido.
+        '422':
+          description: '`refresh_token` ausente.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '429':
+          description: Limite de requisições excedido.
+
+  /v1/auth/session:
+    get:
+      tags: [Identity]
+      operationId: getSession
+      summary: Quem sou eu
+      description: |
+        Devolve o portador do access token, lido dos claims assinados — **sem
+        consultar o banco**.
+
+        **É a fonte autoritativa do que o portador pode fazer agora.** Os
+        papéis aqui são os que o middleware usa para autorizar, porque saem do
+        mesmo token. O `GET /v1/me` não devolve papéis justamente por isso: o
+        banco pode já ter um papel concedido que o token ainda não tem — ele
+        só entra na próxima renovação (`POST /v1/auth/refresh`).
+
+        Um cliente que receba `403` numa rota que ele acredita ter permissão
+        deve comparar com esta rota: papel ausente aqui significa token
+        desatualizado, e a correção é renovar.
+
+        Serve também para conferir se o token ainda vale sem provocar efeito
+        colateral, a custo de zero consulta ao banco.
+
+        Não traz `name`: o token não carrega nome, porque seria peso em toda
+        requisição para um dado que autorização nenhuma usa.
+      responses:
+        '200':
+          description: Token válido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticatedUser'
+              example:
+                id: 01a0866c-16d9-7122-99ae-3906224fcb85
+                email: joao@shopmaster.test
+                roles: [buyer]
+        '401':
+          description: |
+            Devolvido com o cabeçalho `WWW-Authenticate: Bearer`.
+
+            | `error.code` | Quando |
+            |---|---|
+            | `expired_token` | Assinatura válida, prazo vencido — use o refresh |
+            | `invalid_token` | Ausente, malformado, adulterado, ou um refresh token usado no lugar do access |
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+              example: Bearer
+
+  /v1/me:
+    get:
+      tags: [Identity]
+      operationId: getMyProfile
+      summary: Minha conta
+      description: |
+        Devolve a conta do portador do token. O id vem **do token**, nunca da
+        rota nem do corpo — não há como apontar para a conta de outra pessoa.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: A conta do token não existe mais.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    patch:
+      tags: [Identity]
+      operationId: updateMyProfile
+      summary: Editar minha conta
+      description: |
+        Altera nome, telefone e documento (RF-005). **Parcial**: o que não for
+        enviado não é tocado.
+
+        **O e-mail não se troca no v1.** Enviá-lo devolve `422
+        validation_failed` — recusar explicitamente é melhor do que ignorar em
+        silêncio, senão quem tentou sai achando que trocou.
+
+        **O documento só se define uma vez.** Depois de gravado, enviar um
+        valor diferente devolve `409 document_already_set`. Reenviar o
+        **mesmo** valor é aceito, para o PATCH continuar idempotente quando o
+        cliente manda o formulário inteiro.
+
+        `document` e `document_type` são obrigatórios um com o outro: um valor
+        sem tipo é algo que ninguém sabe validar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+            examples:
+              contato:
+                summary: Telefone
+                value:
+                  phone: (11) 98888-7777
+              documento:
+                summary: Definir o documento
+                value:
+                  document: 529.982.247-25
+                  document_type: cpf
+      responses:
+        '200':
+          description: Conta atualizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: A conta do token não existe mais.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            `document_already_set` — a conta já tem documento, e ele é
+            imutável. Reenviar o mesmo valor **não** cai aqui.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: document_already_set
+                  message: O documento ja foi definido e nao pode ser trocado.
+        '422':
+          description: |
+            | `error.code` | Quando |
+            |---|---|
+            | `validation_failed` | Campo mal formado, `document` sem `document_type`, tipo fora do enum, ou tentativa de trocar o e-mail. Traz `error.fields`. |
+            | `document_already_in_use` | O documento já está cadastrado em outra conta. |
+            | `invalid_document` | Formato ou dígito verificador não conferem. |
+            | `invalid_phone` | DDD inexistente, tamanho errado, ou celular que não começa com 9. |
+            | `invalid_name` | Nome vazio ou longo demais. |
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
+
   /v1/auth/register:
     post:
       tags: [Identity]

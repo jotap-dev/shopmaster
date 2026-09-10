@@ -27,12 +27,18 @@ O mapa completo, com o diagrama e o padrão de cada relação, está em [plano-d
 
 | Camada | Classes |
 |---|---|
-| `Domain/` | `PersonName`, `EmailAddress`, `PlainPassword`, `HashedPassword`, `PlatformRole`, `NewUser`, `RegisteredUser` + as exceções de invariante |
-| `Application/` | `RegisterUser`; portas `UserRepository` e `PasswordHasher`; exceção `EmailAlreadyRegistered` |
-| `Infrastructure/` | `EloquentUserRepository`, `BcryptPasswordHasher` |
-| `Interface/Http/` | `RegisterUserController`, `RegisterUserRequest`, `RegisteredUserResource` |
+| `Domain/` | `PersonName`, `EmailAddress`, `PhoneNumber`, `Document`, `DocumentType`, `UserProfile`, `ProfileChanges`, `PlainPassword`, `HashedPassword`, `PlatformRole`, `NewUser`, `RegisteredUser`, `UserIdentity`, `UserCredentials`, `AuthenticatedSession`, `AuthenticatedUser`, `TokenPair`, `TokenClaims`, `TokenType` + as exceções de invariante |
+| `Application/` | `RegisterUser`, `Authenticate`, `RefreshAccessToken`, `AuthenticateAccessToken`, `GetMyProfile`, `UpdateMyProfile`; portas `UserRepository`, `PasswordHasher`, `TokenIssuer`, `RefreshTokenBlacklist`; exceções `EmailAlreadyRegistered`, `InvalidCredentials`, `InvalidToken`, `ExpiredToken`, `RefreshTokenAlreadyUsed`, `AuthUserNotFound` |
+| `Infrastructure/` | `EloquentUserRepository`, `BcryptPasswordHasher`, `HmacJwtTokenIssuer`, `RedisRefreshTokenBlacklist` |
+| `Interface/Http/` | `RegisterUserController`, `AuthController`, `SessionController`, o middleware `AuthenticateWithAccessToken` + Requests e Resources |
 
-Tabelas: `users` (e-mail em `citext`, único) e `user_platform_roles`.
+Tabelas: `users` (e-mail em `citext`, único) e `user_platform_roles`. O login e o refresh **não** acrescentaram schema — a sessão é stateless, e a única coisa persistida é a revogação do refresh, que vive no Redis com TTL.
+
+**Documento aceita CPF, CNH e CNPJ** — os três com dígito verificador conferido. O CNPJ segue o formato **alfanumérico** (IN RFB 2.229/2024), o que também cobre o `Store`: o RF-010 pede CNPJ ou CPF na criação da loja, e o VO `Document` já serve os dois contextos quando a Fase 2 chegar.
+
+**Telefone e documento ficaram no `Identity`, não no `Customer`.** São atributos da *conta* — o documento é o que sustentará verificação de lojista e KYC —, não dados de comprador. Espalhar a pessoa por duas tabelas sem motivo custa um JOIN em todo lugar. O `Customer` fica com o que é de e-commerce puro: endereços e favoritos.
+
+**Três carriers parecidos, três propósitos.** `UserCredentials` é o único que toca o hash, e só existe no caminho do login. `UserIdentity` é quem a pessoa é, sem credencial. `AuthenticatedUser` é o que o token diz — e não tem nome, porque o token não carrega nome. Forçá-los a compartilhar uma classe acoplaria casos de uso que não têm relação.
 
 **A regra "todo mundo nasce comprador" mora em `NewUser::register()`** — não no Controller, não num valor padrão de coluna, não num seeder. O dia em que o cadastro puder nascer com outro papel, muda um arquivo só.
 

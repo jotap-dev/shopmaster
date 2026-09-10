@@ -9,6 +9,7 @@ use Identity\Application\EmailAlreadyRegistered;
 use Identity\Application\PasswordHasher;
 use Identity\Application\RegisterUser;
 use Identity\Application\UserRepository;
+use Identity\Domain\Document;
 use Identity\Domain\EmailAddress;
 use Identity\Domain\HashedPassword;
 use Identity\Domain\InvalidEmailAddress;
@@ -16,7 +17,12 @@ use Identity\Domain\InvalidPassword;
 use Identity\Domain\NewUser;
 use Identity\Domain\PlainPassword;
 use Identity\Domain\PlatformRole;
+use Identity\Domain\ProfileChanges;
 use Identity\Domain\RegisteredUser;
+use Identity\Domain\UserCredentials;
+use Identity\Domain\UserIdentity;
+use Identity\Domain\UserProfile;
+use LogicException;
 use PHPUnit\Framework\TestCase;
 
 final class RegisterUserTest extends TestCase
@@ -116,6 +122,31 @@ final class RegisterUserTest extends TestCase
             {
                 throw EmailAlreadyRegistered::for($user->email);
             }
+
+            public function findCredentialsByEmail(EmailAddress $email): ?UserCredentials
+            {
+                throw new LogicException('not needed by this test');
+            }
+
+            public function findIdentityById(string $id): ?UserIdentity
+            {
+                throw new LogicException('not needed by this test');
+            }
+
+            public function findProfileById(string $id): ?UserProfile
+            {
+                throw new LogicException('not needed by this test');
+            }
+
+            public function documentIsTakenByAnother(Document $document, string $ownerId): bool
+            {
+                throw new LogicException('not needed by this test');
+            }
+
+            public function updateProfile(string $id, ProfileChanges $changes): UserProfile
+            {
+                throw new LogicException('not needed by this test');
+            }
         };
 
         (new RegisterUser($repositorio, $this->hasher()))
@@ -178,6 +209,31 @@ final class RegisterUserTest extends TestCase
                     roles: $user->roles,
                     registeredAt: new DateTimeImmutable('2026-09-07 12:00:00'),
                 );
+            }
+
+            public function findCredentialsByEmail(EmailAddress $email): ?UserCredentials
+            {
+                throw new LogicException('not needed by this test');
+            }
+
+            public function findIdentityById(string $id): ?UserIdentity
+            {
+                throw new LogicException('not needed by this test');
+            }
+
+            public function findProfileById(string $id): ?UserProfile
+            {
+                throw new LogicException('not needed by this test');
+            }
+
+            public function documentIsTakenByAnother(Document $document, string $ownerId): bool
+            {
+                throw new LogicException('not needed by this test');
+            }
+
+            public function updateProfile(string $id, ProfileChanges $changes): UserProfile
+            {
+                throw new LogicException('not needed by this test');
             }
         };
     }

@@ -4,9 +4,14 @@ declare(strict_types=1);
 
 namespace Identity\Application;
 
+use Identity\Domain\Document;
 use Identity\Domain\EmailAddress;
 use Identity\Domain\NewUser;
+use Identity\Domain\ProfileChanges;
 use Identity\Domain\RegisteredUser;
+use Identity\Domain\UserCredentials;
+use Identity\Domain\UserIdentity;
+use Identity\Domain\UserProfile;
 
 interface UserRepository
 {
@@ -22,4 +27,31 @@ interface UserRepository
      * responsabilidade do adapter traduzir essa violação para cá.
      */
     public function add(NewUser $user): RegisteredUser;
+
+    /** Caminho do login: é o único lugar que carrega o hash da senha. */
+    public function findCredentialsByEmail(EmailAddress $email): ?UserCredentials;
+
+    /**
+     * Caminho do refresh: recarrega quem o token diz ser, **sem** o hash.
+     *
+     * É recarregado do banco, e não reaproveitado dos claims, para que
+     * mudança de papel valha a partir do próximo refresh — e para que um
+     * token de conta apagada deixe de funcionar.
+     */
+    public function findIdentityById(string $id): ?UserIdentity;
+
+    /** Caminho de "minha conta": identidade + contato, sem credencial. */
+    public function findProfileById(string $id): ?UserProfile;
+
+    /** O documento pertence a **outra** conta? Fecha a unicidade do RF-005. */
+    public function documentIsTakenByAnother(Document $document, string $ownerId): bool;
+
+    /**
+     * Aplica só os campos informados e devolve a conta atualizada.
+     *
+     * **Contrato:** lança `DocumentAlreadyInUse` se a unicidade do documento
+     * for violada. Como no cadastro, a verificação prévia é cortesia — quem
+     * garante é a constraint do banco, e traduzi-la é do adapter.
+     */
+    public function updateProfile(string $id, ProfileChanges $changes): UserProfile;
 }
