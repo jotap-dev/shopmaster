@@ -23,7 +23,8 @@ Lista única do que precisa existir **fora do código** para a API funcionar em 
 | `REDIS_AUTH_DB` | Não | DB do Redis onde vive a revogação de refresh tokens (padrão 6). **Apontá-lo para o mesmo DB do cache é um risco real**: um `cache:clear` de rotina ressuscitaria todo refresh já queimado, sem nenhum sinal. |
 | `APP_DEBUG` | Sim | Deve ser `false`. Com `true`, stack trace e variáveis de ambiente vazam na resposta de erro. |
 | `BCRYPT_ROUNDS` | Não, mas importa | Padrão 12, lido por `config/hashing.php`. É o custo do hash de senha, e a defesa contra ataque offline se o banco vazar. **Nunca use em produção o valor 4 do `phpunit.xml`** — ele existe só para a suíte não pagar ~100ms por teste. Baixá-lo não quebra nada visível: as senhas continuam funcionando, só ficam baratas de quebrar. |
-| `APP_URL` | Sim | Links absolutos (inclusive o do Swagger) saem errados. |
+| `APP_URL` | Sim | Links absolutos (inclusive o do Swagger) saem errados. Em servidor é o domínio público, **não** `localhost:8001` — aquele valor é só de desenvolvimento. |
+| `APP_PORT` | Não | Só afeta o `docker compose` local: é a porta publicada no host. Em servidor, quem decide a porta de entrada é o proxy reverso. |
 
 ### Degradação silenciosa — o que **não** derruba a API, só desliga uma funcionalidade
 

@@ -29,13 +29,23 @@ docker compose up -d --build
 docker compose exec app php artisan migrate
 ```
 
-A API responde em `http://localhost:8000`; a documentação em `http://localhost:8000/docs`.
+A API responde em `http://localhost:8001`; a documentação em `http://localhost:8001/docs`.
 
-Se a porta 8000 já estiver ocupada (outro projeto rodando, por exemplo), escolha outra — só o lado do host muda:
+## A porta
+
+**8001 no host, 8000 dentro do container.** A 8000 é disputada — outro projeto, um túnel SSH, qualquer servidor de desenvolvimento — e o sintoma é um `address already in use` no primeiro `up` de quem acabou de clonar.
+
+Só o lado de fora mudou. Dentro do container a 8000 não colide com nada, porque o namespace de rede é exclusivo dele; mexer ali exigiria o `CMD` do Dockerfile ler variável de ambiente, complexidade sem ganho nenhum.
+
+Para usar outra:
 
 ```bash
-APP_PORT=8001 docker compose up -d
+APP_PORT=9005 docker compose up -d
 ```
+
+O `compose.yaml` propaga a escolha para o `APP_URL` do container. Sem isso, toda URL gerada fora de uma requisição — job de fila, comando de console, link em e-mail — sairia apontando para a porta errada.
+
+O modo nativo usa a **mesma** porta: `composer dev` roda `php artisan serve --port=8001`. Uma porta para o projeto, nos dois modos.
 
 ## O worker da fila
 

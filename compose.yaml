@@ -4,9 +4,18 @@ services:
       context: .
     image: shopmaster-api
     ports:
-      # Configurável porque 8000 costuma já estar ocupado por outro projeto:
-      #   APP_PORT=8001 docker compose up -d
-      - "${APP_PORT:-8000}:8000"
+      # Porta do projeto: 8001 no host, 8000 dentro do container.
+      #
+      # A 8000 é disputada — outro projeto, um túnel SSH, qualquer servidor de
+      # desenvolvimento. Sair dela por padrão evita o "address already in use"
+      # logo no primeiro `up` de quem clonou.
+      #
+      # Só o lado de FORA muda. Dentro do container a 8000 não colide com
+      # nada, porque o namespace de rede é exclusivo dele — mexer ali exigiria
+      # o CMD do Dockerfile ler variável de ambiente, complexidade sem ganho.
+      #
+      # Trocar é pontual: APP_PORT=9005 docker compose up -d
+      - "${APP_PORT:-8001}:8000"
     volumes:
       # Código montado do host: editar uma classe reflete sem rebuild.
       - .:/app
@@ -18,6 +27,11 @@ services:
       # projeto (ver docs/docker.md para a variante com serviços containerizados).
       DB_HOST: host.docker.internal
       REDIS_HOST: host.docker.internal
+
+      # Acompanha a porta publicada. Sem isto, toda URL gerada fora de uma
+      # requisição — job de fila, comando de console, link em e-mail — sairia
+      # apontando para a porta do `.env`, que é a do modo nativo.
+      APP_URL: http://localhost:${APP_PORT:-8001}
     # No macOS o `host.docker.internal` já resolve sozinho; no Linux, não —
     # precisa deste mapeamento. No Colima ele resolve para o mesmo IP, então
     # declarar aqui é seguro e torna o compose portável.
