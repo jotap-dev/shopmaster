@@ -20,8 +20,14 @@ info:
     identifier: LicenseRef-Proprietary
 
 servers:
-  - url: http://localhost:8000
-    description: Desenvolvimento local
+  # Produção primeiro: é o que o Swagger UI seleciona por padrão, e é o
+  # endereço que o time de front consome. O caminho `/shopmaster` faz parte
+  # da URL base porque a VPS hospeda várias aplicações, cada uma num prefixo
+  # — o Traefik o remove antes de encaminhar, e a app não o vê nas rotas.
+  - url: https://jpdevm.systems/shopmaster
+    description: Produção
+  - url: http://localhost:8001
+    description: Desenvolvimento local (docker compose up)
 
 tags:
   - name: Meta
@@ -700,7 +706,7 @@ paths:
               example:
                 name: ShopMaster
                 version: v1
-                docs: http://localhost:8000/docs
+                docs: https://jpdevm.systems/shopmaster/docs
 
   /up:
     get:

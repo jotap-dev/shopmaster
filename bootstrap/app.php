@@ -22,6 +22,27 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Em produção a aplicação vive atrás do Traefik, e o php-fpm só vê a
+        // conexão interna do Docker. Sem confiar no proxy, o Laravel conclui
+        // que a requisição é HTTP e gera URLs `http://` atrás do seu HTTPS —
+        // e perde o prefixo `/shopmaster`, devolvendo links quebrados.
+        //
+        // Confiando, ele lê `X-Forwarded-Proto`, `X-Forwarded-Host` e
+        // `X-Forwarded-Prefix`. Este último já vem no conjunto padrão do
+        // Laravel, e o Symfony o aplica em `getBaseUrl()` — que é o que o
+        // `UrlGenerator` usa. Uma linha resolve o prefixo inteiro.
+        //
+        // `at: '*'` é seguro AQUI pelo desenho da rede: o php-fpm está só nas
+        // redes `appnet` e `internal`, e a única coisa que o alcança é o nginx
+        // da própria app, que por sua vez só é alcançado pelo Traefik. Se algum
+        // dia este container publicar porta ou entrar numa rede compartilhada,
+        // esta linha precisa virar uma lista de CIDRs.
+        //
+        // O outro lado da defesa está no Traefik: `aliasheadersstrategy=delete`
+        // descarta cabeçalhos com sublinhado (`X_Forwarded_Proto`), que o
+        // FastCGI converteria na mesma variável e permitiria falsificação.
+        $middleware->trustProxies(at: '*');
+
         $middleware->alias([
             // Autenticação por access token. O papel de PLATAFORMA viaja
             // no token; a guarda `role` lê esses claims (RF-007).

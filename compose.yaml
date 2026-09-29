@@ -1,50 +1,58 @@
+# Desenvolvimento local.
+#
+# Dois containers, como em produção: o nginx fala HTTP, o php-fpm executa o
+# PHP. Eles NÃO são um dentro do outro — são irmãos, e conversam por FastCGI.
+#
+# Postgres e Redis rodam no HOST (Homebrew), não em container: é o setup local
+# deste projeto. Na VPS eles são containers compartilhados — ver docs/docker.md.
+
 services:
-  app:
+  nginx:
     build:
       context: .
-    image: shopmaster-api
+      target: nginx
+    image: shopmaster-nginx:dev
     ports:
-      # Porta do projeto: 8001 no host, 8000 dentro do container.
-      #
-      # A 8000 é disputada — outro projeto, um túnel SSH, qualquer servidor de
-      # desenvolvimento. Sair dela por padrão evita o "address already in use"
-      # logo no primeiro `up` de quem clonou.
-      #
-      # Só o lado de FORA muda. Dentro do container a 8000 não colide com
-      # nada, porque o namespace de rede é exclusivo dele — mexer ali exigiria
-      # o CMD do Dockerfile ler variável de ambiente, complexidade sem ganho.
-      #
-      # Trocar é pontual: APP_PORT=9005 docker compose up -d
-      - "${APP_PORT:-8001}:8000"
+      # Porta do projeto: 8001 no host, 80 dentro do container.
+      # A 8000 é disputada — outro projeto, um túnel SSH, um servidor de
+      # desenvolvimento. Trocar é pontual: APP_PORT=9005 docker compose up -d
+      - "${APP_PORT:-8001}:80"
+    depends_on:
+      - php
+    restart: unless-stopped
+
+  php:
+    build:
+      context: .
+      # O Dockerfile tem três alvos. Sem declarar, o build pegaria o último do
+      # arquivo — que é o nginx.
+      target: dev
+    image: shopmaster:dev
     volumes:
       # Código montado do host: editar uma classe reflete sem rebuild.
       - .:/app
       # Volume anônimo protegendo o vendor/ instalado na imagem — sem ele o
-      # bind mount de cima esconderia as dependências e o container sobe vazio.
+      # bind mount acima o esconderia e o container sobe sem dependências.
       - /app/vendor
     environment:
-      # Postgres e Redis rodam no HOST, não em container: é o setup local do
-      # projeto (ver docs/docker.md para a variante com serviços containerizados).
       DB_HOST: host.docker.internal
       REDIS_HOST: host.docker.internal
-
-      # Acompanha a porta publicada. Sem isto, toda URL gerada fora de uma
-      # requisição — job de fila, comando de console, link em e-mail — sairia
-      # apontando para a porta do `.env`, que é a do modo nativo.
+      # Acompanha a porta publicada pelo nginx. Sem isto, URL gerada fora de
+      # uma requisição — job de fila, comando de console — sairia errada.
       APP_URL: http://localhost:${APP_PORT:-8001}
-    # No macOS o `host.docker.internal` já resolve sozinho; no Linux, não —
-    # precisa deste mapeamento. No Colima ele resolve para o mesmo IP, então
-    # declarar aqui é seguro e torna o compose portável.
+    # No macOS o host.docker.internal resolve sozinho; no Linux, não. No
+    # Colima aponta para o mesmo IP, então declarar é seguro nos dois.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
-  # Worker da fila (e-mail transacional, webhook de pagamento).
-  # Só entra em cena na Fase 9 — subir com: docker compose --profile worker up -d
+  # Worker da fila (e-mail transacional, webhook de pagamento) — Fase 9.
+  #   docker compose --profile worker up -d
   worker:
     build:
       context: .
-    image: shopmaster-api
+      target: dev
+    image: shopmaster:dev
     command: ["php", "artisan", "queue:work", "--tries=3", "--max-time=3600"]
     volumes:
       - .:/app
@@ -55,6 +63,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      - app
+      - php
     restart: unless-stopped
     profiles: [worker]

@@ -85,6 +85,30 @@ final class FoundationTest extends TestCase
             ->assertJsonPath('error.code', 'method_not_allowed');
     }
 
+    public function test_respeita_o_prefixo_e_o_esquema_do_proxy_reverso(): void
+    {
+        // Em producao a app vive atras do Traefik, em https://jpdevm.systems/shopmaster.
+        // O Traefik remove o prefixo antes de encaminhar, entao a app recebe
+        // /v1 — mas toda URL que ela gerar precisa sair COM o /shopmaster, ou
+        // o cliente segue um link quebrado.
+        //
+        // Quem carrega essa informacao sao os cabecalhos X-Forwarded-*, e o
+        // Laravel so os respeita se o proxy for confiavel (trustProxies).
+        $resposta = $this->withHeaders([
+            'X-Forwarded-Proto' => 'https',
+            'X-Forwarded-Host' => 'jpdevm.systems',
+            'X-Forwarded-Prefix' => '/shopmaster',
+        ])->getJson('/v1');
+
+        $resposta->assertOk();
+
+        $this->assertSame(
+            'https://jpdevm.systems/shopmaster/docs',
+            $resposta->json('docs'),
+            'Sem confiar no proxy, a URL sai sem o prefixo e em http.',
+        );
+    }
+
     public function test_o_health_check_responde(): void
     {
         $this->get('/up')->assertOk();
