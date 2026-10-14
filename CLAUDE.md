@@ -127,4 +127,4 @@ Esta API **é dona** do schema, ao contrário do participant-api (que lia uma ba
 - `database/migrations/` é a **fonte da verdade** do schema. Toda mudança estrutural nasce como migration.
 - Migration precisa de `down()` que funcione de verdade — Postgres faz DDL transacional, não há desculpa.
 - Testes rodam com `RefreshDatabase` contra `shopmaster_test`, um banco **descartável**. O nome vem do `phpunit.xml`, e `tests/TestCase.php` confirma a cada teste que a suíte não está apontada para o banco de desenvolvimento.
-- Fixture nasce de **factory**, nunca de `INSERT` cru, e nunca com id hardcoded.
+- **Fixture nasce do próprio repositório** (`$repositorio->add(...)`) ou de um helper de teste — nunca de `INSERT` cru, e nunca com id hardcoded. Não há factory do Eloquent porque não há Model do Eloquent: os adapters usam Query Builder, e o domínio não conhece ORM. `INSERT` direto só é aceitável quando o teste está justamente simulando escrita de fora da aplicação (um `psql` na mão), e isso precisa estar escrito no teste.

@@ -8,4 +8,11 @@ storage/framework/cache/data/*
 storage/framework/sessions/*
 storage/framework/views/*
 .phpunit.result.cache
+# Documentação interna não vai para a imagem — plano, requisitos e runbook
+# são para quem desenvolve, não para o servidor.
 docs
+
+# Exceto o contrato: routes/web.php lê este arquivo para servir o Swagger em
+# /docs, e sem ele a rota estoura em produção. A ordem importa: no
+# .dockerignore, o padrão mais abaixo vence o de cima.
+!docs/openapi

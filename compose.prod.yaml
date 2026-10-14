@@ -1,0 +1,147 @@
+# Compose de PRODUÇÃO. Vive na VPS em /srv/shopmaster/compose.yaml.
+#
+# Está versionado aqui porque é a fonte da verdade — mas a cópia para o
+# servidor é MANUAL. Ao mudar este arquivo, copie de novo:
+#
+#   scp compose.prod.yaml deploy@187.127.60.59:/srv/shopmaster/compose.yaml
+#
+# O deploy automatizado atualiza a IMAGEM, não o compose.
+#
+# Traefik, Postgres e Redis NÃO estão aqui: são compartilhados entre as apps
+# da VPS e vivem em /srv/shared.
+
+services:
+  # ───────────────────────────────────────────────────────────────
+  # nginx — a porta de entrada da aplicação
+  # ───────────────────────────────────────────────────────────────
+  nginx:
+    image: ghcr.io/jotap-dev/shopmaster-nginx:latest
+    restart: unless-stopped
+
+    # Sem `ports`. Quem recebe a internet é o Traefik; publicar aqui abriria
+    # um caminho que ignora o TLS e o roteamento.
+    expose:
+      - "80"
+
+    labels:
+      - traefik.enable=true
+
+      # Obrigatório porque este container está em DUAS redes: sem isto o
+      # Traefik pode escolher o IP errado para encaminhar.
+      - traefik.docker.network=web
+
+      # A regra tem duas partes, e as duas são necessárias:
+      #
+      # Host(...)       — é daqui que o Traefik descobre para qual domínio
+      #                   pedir o certificado. Sem ele o ACME nunca é acionado
+      #                   e você fica com o TRAEFIK DEFAULT CERT para sempre.
+      #
+      # PathRegexp(...) — e NÃO PathPrefix: `PathPrefix(/shopmaster)` casa
+      #                   prefixo de string, então pegaria /shopmasterfoo
+      #                   também. O (/|$$) força o limite de segmento.
+      #
+      # O $$ é escape: um $ sozinho seria interpolado pelo Compose.
+      - traefik.http.routers.shopmaster.rule=Host(`jpdevm.systems`) && PathRegexp(`^/shopmaster(/|$$)`)
+      - traefik.http.routers.shopmaster.entrypoints=websecure
+      - traefik.http.routers.shopmaster.tls.certresolver=letsencrypt
+      - traefik.http.routers.shopmaster.middlewares=shopmaster-strip
+
+      # Remove /shopmaster antes de encaminhar: a aplicação recebe /v1/me, e
+      # não /shopmaster/v1/me. O Traefik envia X-Forwarded-Prefix, e é dele
+      # que o Laravel recupera o prefixo ao gerar URLs (ver trustProxies).
+      - traefik.http.middlewares.shopmaster-strip.stripprefix.prefixes=/shopmaster
+
+      - traefik.http.services.shopmaster.loadbalancer.server.port=80
+
+    networks:
+      # `web` para o Traefik alcançá-lo; `appnet` para falar com o php-fpm.
+      - web
+      - appnet
+
+    depends_on:
+      - php
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+
+    logging:
+      # Sem limite, o log de uma app enche os 96 GB e derruba o servidor
+      # inteiro — inclusive o Postgres.
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ───────────────────────────────────────────────────────────────
+  # php — onde o Laravel de fato roda
+  # ───────────────────────────────────────────────────────────────
+  php:
+    image: ghcr.io/jotap-dev/shopmaster:latest
+    restart: unless-stopped
+
+    # O .env fica SÓ no servidor, escrito à mão. Ele tem a senha do banco, a
+    # do Redis e o JWT_SECRET — repositório não é lugar de segredo.
+    env_file:
+      - .env
+
+    networks:
+      # NUNCA em `web`. O php-fpm não deve ser alcançável pela rede exposta;
+      # a única entrada é o nginx da própria aplicação.
+      - appnet
+      - internal
+
+    deploy:
+      resources:
+        limits:
+          # Casa com o pm.max_children = 10 do docker/php/www.conf:
+          # 10 processos x ~40 MB cabem nos 512M.
+          cpus: '1.0'
+          memory: 512M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ───────────────────────────────────────────────────────────────
+  # worker da fila — e-mail transacional e webhook (Fase 9 do plano)
+  #   docker compose --profile worker up -d
+  # ───────────────────────────────────────────────────────────────
+  worker:
+    image: ghcr.io/jotap-dev/shopmaster:latest
+    restart: unless-stopped
+    # Mesma imagem do php, comando diferente: roda o binário php direto, num
+    # laço consumindo a fila. Não escuta porta e não fala FastCGI.
+    command: ["php", "artisan", "queue:work", "--tries=3", "--max-time=3600"]
+    env_file:
+      - .env
+    networks:
+      - internal
+    depends_on:
+      - php
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    profiles: [worker]
+
+networks:
+  # Criadas pela stack compartilhada em /srv/shared — por isso `external`.
+  web:
+    external: true
+  internal:
+    external: true
+
+  # Privada desta aplicação, criada por este compose. É por ela que o nginx
+  # fala com o php-fpm, e nenhuma outra app a enxerga.
+  appnet:

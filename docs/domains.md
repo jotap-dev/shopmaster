@@ -7,8 +7,8 @@ O mapa completo, com o diagrama e o padrão de cada relação, está em [plano-d
 | Contexto | Tipo | Responsabilidade | Status | Fase |
 |---|---|---|---|---|
 | **Shared** | Kernel | `EventBus`, `Money`, `Clock`, `ErrorResource`, `Auth` | **Parcial** — `EventBus`, `Money` e `Clock` prontos; `Auth` vem com Identity | 0 |
-| **Identity** | Genérico | Registro, login, refresh, papéis **de plataforma** | Esqueleto | 1 |
-| **Customer** | Suporte | Dados do cliente, endereços, favoritos | Esqueleto | 1 e 3 |
+| **Identity** | Genérico | Registro, login, refresh, minha conta, papéis **de plataforma** | **Parcial** — cadastro, login, refresh, `auth.token`, `role`, "minha conta" e gestão de papéis prontos | 1 |
+| **Customer** | Suporte | Endereços salvos e favoritos | **Parcial** — agenda de endereços (RF-006) pronta; favoritos na Fase 3 | 1 e 3 |
 | **Store** | **Core** | Loja, membros, **papéis de loja**, aprovação, comissão | Esqueleto | 2 |
 | **Catalog** | **Core** | Produto **de uma loja**, variação (SKU global), categoria, busca | Esqueleto | 3 |
 | **Inventory** | **Core** | Saldo por SKU, reserva, baixa, devolução | Esqueleto | 4 |
@@ -22,6 +22,38 @@ O mapa completo, com o diagrama e o padrão de cada relação, está em [plano-d
 | **ExampleContext** | — | Esqueleto de referência para o próximo contexto | Placeholder | — |
 
 "Esqueleto" = a árvore de pastas e o namespace PSR-4 existem; ainda não há código.
+
+### O que já existe no Identity
+
+| Camada | Classes |
+|---|---|
+| `Domain/` | `PersonName`, `EmailAddress`, `PhoneNumber`, `Document`, `DocumentType`, `UserProfile`, `ProfileChanges`, `PlainPassword`, `HashedPassword`, `PlatformRole`, `NewUser`, `RegisteredUser`, `UserIdentity`, `UserCredentials`, `AuthenticatedSession`, `AuthenticatedUser`, `TokenPair`, `TokenClaims`, `TokenType` + as exceções de invariante |
+| `Application/` | `RegisterUser`, `Authenticate`, `RefreshAccessToken`, `AuthenticateAccessToken`, `GetMyProfile`, `UpdateMyProfile`, `SetPlatformRoles`; portas `UserRepository`, `PasswordHasher`, `TokenIssuer`, `RefreshTokenBlacklist`; exceções `EmailAlreadyRegistered`, `InvalidCredentials`, `InvalidToken`, `ExpiredToken`, `RefreshTokenAlreadyUsed`, `AuthUserNotFound`, `UserNotFound`, `CannotRevokeOwnAdmin`, `InvalidPlatformRole` |
+| `Infrastructure/` | `EloquentUserRepository`, `BcryptPasswordHasher`, `HmacJwtTokenIssuer`, `RedisRefreshTokenBlacklist` |
+| `Interface/Http/` | `RegisterUserController`, `AuthController`, `SessionController`, `MyProfileController`, `AdminUserRolesController`, middlewares `AuthenticateWithAccessToken` e `RequirePlatformRole` + Requests e Resources |
+
+Tabelas: `users` (e-mail em `citext`, único) e `user_platform_roles`. O login e o refresh **não** acrescentaram schema — a sessão é stateless, e a única coisa persistida é a revogação do refresh, que vive no Redis com TTL.
+
+### O que já existe no Customer
+
+| Camada | Classes |
+|---|---|
+| `Domain/` | `Address`, `NewAddress`, `AddressChanges`, `PostalCode`, `BrazilianState` + exceções de invariante |
+| `Application/` | `ListMyAddresses`, `GetMyAddress`, `AddAddress`, `UpdateAddress`, `RemoveAddress`; porta `AddressRepository`; exceção `AddressNotFound` |
+| `Infrastructure/` | `EloquentAddressRepository` |
+| `Interface/Http/` | `MyAddressController` + Requests e `AddressResource` |
+
+Tabela: `addresses` (FK `user_id` → `users`). **Não há tabela `customers`:** a conta já vive em `users`; Customer guarda só o que é de e-commerce (endereço agora, favorito depois). Índice único parcial garante no máximo um `is_default` por usuário.
+
+**O primeiro endereço vira padrão.** Pedir `is_default: true` num seguinte troca o padrão na mesma transação. Remover o padrão promove o mais antigo restante — a agenda nunca fica sem padrão enquanto houver endereço.
+
+**Documento aceita CPF, CNH e CNPJ** — os três com dígito verificador conferido. O CNPJ segue o formato **alfanumérico** (IN RFB 2.229/2024), o que também cobre o `Store`: o RF-010 pede CNPJ ou CPF na criação da loja, e o VO `Document` já serve os dois contextos quando a Fase 2 chegar.
+
+**Telefone e documento ficaram no `Identity`, não no `Customer`.** São atributos da *conta* — o documento é o que sustentará verificação de lojista e KYC —, não dados de comprador. Espalhar a pessoa por duas tabelas sem motivo custa um JOIN em todo lugar. O `Customer` fica com o que é de e-commerce puro: endereços e favoritos.
+
+**Três carriers parecidos, três propósitos.** `UserCredentials` é o único que toca o hash, e só existe no caminho do login. `UserIdentity` é quem a pessoa é, sem credencial. `AuthenticatedUser` é o que o token diz — e não tem nome, porque o token não carrega nome. Forçá-los a compartilhar uma classe acoplaria casos de uso que não têm relação.
+
+**A regra "todo mundo nasce comprador" mora em `NewUser::register()`** — não no Controller, não num valor padrão de coluna, não num seeder. O dia em que o cadastro puder nascer com outro papel, muda um arquivo só.
 
 ## As fronteiras, e por que ficaram onde ficaram
 

@@ -1,0 +1,127 @@
+name: Deploy
+
+# Só `master` publica. O trabalho acontece em develop, e promover para
+# produção é um merge consciente — não efeito colateral de salvar arquivo.
+on:
+  push:
+    branches: [master]
+  # Permite republicar sem commit novo, para quando o problema foi no
+  # servidor e não no código.
+  workflow_dispatch:
+
+concurrency:
+  # NÃO cancela em andamento, ao contrário do CI: abortar um deploy no meio
+  # deixa o servidor num estado que ninguém declarou.
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  IMAGE_PHP: ghcr.io/${{ github.repository }}
+  IMAGE_NGINX: ghcr.io/${{ github.repository }}-nginx
+
+jobs:
+  build:
+    name: Construir e publicar as imagens
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # É isto que deixa o GITHUB_TOKEN empurrar para o GHCR, sem precisar
+      # criar e rotacionar um token de registry à mão.
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Entrar no GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # DUAS imagens, porque a aplicação são dois containers: o php-fpm que
+      # executa o Laravel e o nginx que fala HTTP. Elas saem do mesmo
+      # Dockerfile, por alvos diferentes.
+      - name: Imagem do php-fpm
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: production
+          push: true
+          # Duas tags: o SHA identifica exatamente o que está rodando — e é
+          # o que permite voltar atrás. `latest` é o que o servidor puxa.
+          tags: |
+            ${{ env.IMAGE_PHP }}:${{ github.sha }}
+            ${{ env.IMAGE_PHP }}:latest
+          cache-from: type=gha,scope=php
+          cache-to: type=gha,mode=max,scope=php
+
+      - name: Imagem do nginx
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: nginx
+          push: true
+          tags: |
+            ${{ env.IMAGE_NGINX }}:${{ github.sha }}
+            ${{ env.IMAGE_NGINX }}:latest
+          cache-from: type=gha,scope=nginx
+          cache-to: type=gha,mode=max,scope=nginx
+
+  deploy:
+    name: Publicar na VPS
+    needs: build
+    runs-on: ubuntu-latest
+    # Amarre este ambiente no GitHub com "required reviewers" para exigir sua
+    # aprovação entre o merge e o servidor. Sem isso, todo push em master
+    # publica sozinho.
+    environment: production
+
+    steps:
+      - name: Subir a versão nova
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          # Aborta no primeiro comando que falhar, em vez de seguir e
+          # terminar verde com o deploy pela metade.
+          script_stop: true
+          # Passados como variáveis de ambiente, não interpolados no script:
+          # assim não aparecem na linha de comando do servidor.
+          envs: GHCR_USER,GHCR_TOKEN
+          script: |
+            set -euo pipefail
+            cd /srv/shopmaster
+
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            docker compose pull
+
+            # Migration ANTES de trocar o container: por alguns segundos a
+            # versão velha e a nova coexistem, então o schema precisa servir
+            # as duas. Migration destrutiva (remover coluna, renomear) não
+            # cabe aqui — vai em duas entregas separadas.
+            docker compose run --rm --no-deps php php artisan migrate --force
+
+            # `--wait` só retorna quando o HEALTHCHECK das imagens passa. Sem
+            # ele o job termina verde enquanto a app ainda sobe — ou enquanto
+            # morre em laço.
+            docker compose up -d --wait
+
+            # Os caches são gerados AGORA, não no build: no build da imagem as
+            # variáveis reais do servidor ainda não existem, e o cache
+            # congelaria valores errados.
+            docker compose exec -T php php artisan config:cache
+            docker compose exec -T php php artisan route:cache
+
+            # Avisa os workers da fila para morrerem após o job atual e
+            # subirem com o código novo. `|| true` porque o worker está atrás
+            # de um profile e pode não estar rodando.
+            docker compose exec -T php php artisan queue:restart || true
+
+            docker image prune -f
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}

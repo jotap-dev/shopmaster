@@ -20,15 +20,26 @@ info:
     identifier: LicenseRef-Proprietary
 
 servers:
-  - url: http://localhost:8000
-    description: Desenvolvimento local
+  # Produção primeiro: é o que o Swagger UI seleciona por padrão, e é o
+  # endereço que o time de front consome. O caminho `/shopmaster` faz parte
+  # da URL base porque a VPS hospeda várias aplicações, cada uma num prefixo
+  # — o Traefik o remove antes de encaminhar, e a app não o vê nas rotas.
+  - url: https://jpdevm.systems/shopmaster
+    description: Produção
+  - url: http://localhost:8001
+    description: Desenvolvimento local (docker compose up)
 
 tags:
   - name: Meta
     description: Informações da própria API
+  - name: Identity
+    description: |
+      Cadastro, autenticação e papéis de plataforma.
+  - name: Customer
+    description: |
+      Agenda de endereços do comprador (favoritos entram na Fase 3).
   # Uma tag por bounded context, com o mesmo nome de src/<Context>/.
   # Entram conforme as fases do plano:
-  # - name: Identity
   # - name: Store
   # - name: Catalog
   # - name: Inventory
@@ -40,6 +51,635 @@ tags:
   # - name: Review
 
 paths:
+  /v1/auth:
+    post:
+      tags: [Identity]
+      operationId: authenticate
+      summary: Autenticar
+      description: |
+        Troca e-mail e senha por um par de tokens (RF-003).
+
+        O e-mail é comparado sem diferenciar maiúsculas.
+
+        **Toda falha de credencial devolve exatamente a mesma resposta**
+        (RF-008): e-mail inexistente, e-mail malformado, senha errada — tudo
+        vira `401 invalid_credentials`, com a mesma mensagem. Distinguir
+        qualquer um deles transformaria esta rota num verificador de
+        "esta conta existe?".
+
+        Rota pública, limitada a 10 requisições por minuto por IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: joao@shopmaster.test
+              password: senha-forte-123
+      responses:
+        '200':
+          description: Autenticado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '401':
+          description: Credenciais inválidas — `error.code` é sempre `invalid_credentials`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: invalid_credentials
+                  message: Credenciais invalidas.
+        '422':
+          description: '`email` ou `password` ausentes. `error.code` é `validation_failed`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '429':
+          description: Limite de requisições excedido (10 por minuto, por IP).
+
+  /v1/auth/refresh:
+    post:
+      tags: [Identity]
+      operationId: refreshSession
+      summary: Renovar a sessão
+      description: |
+        Troca o refresh token por um **par novo** (RF-004).
+
+        O refresh é de **uso único**: ao ser trocado, é revogado. Um refresh
+        roubado só serve uma vez — e, se o dono legítimo usar o dele primeiro,
+        o do atacante recebe `refresh_token_already_used`, que é o sinal de
+        que houve vazamento.
+
+        O access token anterior **continua válido** até expirar: só o refresh
+        é revogável. É por isso que o TTL do access é curto.
+
+        Os papéis de plataforma são recarregados do banco nesta troca — é o
+        momento em que uma mudança de papel passa a valer.
+
+        Rota pública, limitada a 30 requisições por minuto por IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Par novo emitido; o refresh enviado foi revogado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '401':
+          description: |
+            | `error.code` | Quando | O que o cliente faz |
+            |---|---|---|
+            | `refresh_token_already_used` | O refresh já foi trocado antes | Refazer o login |
+            | `expired_token` | Passou dos 30 dias | Refazer o login |
+            | `invalid_token` | Malformado, assinatura errada, tipo errado (um access no lugar do refresh), ou conta removida | Refazer o login |
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                jaUsado:
+                  summary: Refresh já trocado
+                  value:
+                    error:
+                      code: refresh_token_already_used
+                      message: Este refresh token ja foi usado.
+                invalido:
+                  summary: Token inválido
+                  value:
+                    error:
+                      code: invalid_token
+                      message: Token invalido.
+        '422':
+          description: '`refresh_token` ausente.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '429':
+          description: Limite de requisições excedido.
+
+  /v1/auth/session:
+    get:
+      tags: [Identity]
+      operationId: getSession
+      summary: Quem sou eu
+      description: |
+        Devolve o portador do access token, lido dos claims assinados — **sem
+        consultar o banco**.
+
+        **É a fonte autoritativa do que o portador pode fazer agora.** Os
+        papéis aqui são os que o middleware usa para autorizar, porque saem do
+        mesmo token. O `GET /v1/me` não devolve papéis justamente por isso: o
+        banco pode já ter um papel concedido que o token ainda não tem — ele
+        só entra na próxima renovação (`POST /v1/auth/refresh`).
+
+        Um cliente que receba `403` numa rota que ele acredita ter permissão
+        deve comparar com esta rota: papel ausente aqui significa token
+        desatualizado, e a correção é renovar.
+
+        Serve também para conferir se o token ainda vale sem provocar efeito
+        colateral, a custo de zero consulta ao banco.
+
+        Não traz `name`: o token não carrega nome, porque seria peso em toda
+        requisição para um dado que autorização nenhuma usa.
+      responses:
+        '200':
+          description: Token válido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticatedUser'
+              example:
+                id: 01a0866c-16d9-7122-99ae-3906224fcb85
+                email: joao@shopmaster.test
+                roles: [buyer]
+        '401':
+          description: |
+            Devolvido com o cabeçalho `WWW-Authenticate: Bearer`.
+
+            | `error.code` | Quando |
+            |---|---|
+            | `expired_token` | Assinatura válida, prazo vencido — use o refresh |
+            | `invalid_token` | Ausente, malformado, adulterado, ou um refresh token usado no lugar do access |
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+              example: Bearer
+
+  /v1/me:
+    get:
+      tags: [Identity]
+      operationId: getMyProfile
+      summary: Minha conta
+      description: |
+        Devolve a conta do portador do token. O id vem **do token**, nunca da
+        rota nem do corpo — não há como apontar para a conta de outra pessoa.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: A conta do token não existe mais.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    patch:
+      tags: [Identity]
+      operationId: updateMyProfile
+      summary: Editar minha conta
+      description: |
+        Altera nome, telefone e documento (RF-005). **Parcial**: o que não for
+        enviado não é tocado.
+
+        **O e-mail não se troca no v1.** Enviá-lo devolve `422
+        validation_failed` — recusar explicitamente é melhor do que ignorar em
+        silêncio, senão quem tentou sai achando que trocou.
+
+        **O documento só se define uma vez.** Depois de gravado, enviar um
+        valor diferente devolve `409 document_already_set`. Reenviar o
+        **mesmo** valor é aceito, para o PATCH continuar idempotente quando o
+        cliente manda o formulário inteiro.
+
+        `document` e `document_type` são obrigatórios um com o outro: um valor
+        sem tipo é algo que ninguém sabe validar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+            examples:
+              contato:
+                summary: Telefone
+                value:
+                  phone: (11) 98888-7777
+              documento:
+                summary: Definir o documento
+                value:
+                  document: 529.982.247-25
+                  document_type: cpf
+      responses:
+        '200':
+          description: Conta atualizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: A conta do token não existe mais.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            `document_already_set` — a conta já tem documento, e ele é
+            imutável. Reenviar o mesmo valor **não** cai aqui.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: document_already_set
+                  message: O documento ja foi definido e nao pode ser trocado.
+        '422':
+          description: |
+            | `error.code` | Quando |
+            |---|---|
+            | `validation_failed` | Campo mal formado, `document` sem `document_type`, tipo fora do enum, ou tentativa de trocar o e-mail. Traz `error.fields`. |
+            | `document_already_in_use` | O documento já está cadastrado em outra conta. |
+            | `invalid_document` | Formato ou dígito verificador não conferem. |
+            | `invalid_phone` | DDD inexistente, tamanho errado, ou celular que não começa com 9. |
+            | `invalid_name` | Nome vazio ou longo demais. |
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
+
+  /v1/me/addresses:
+    get:
+      tags: [Customer]
+      operationId: listMyAddresses
+      summary: Listar meus endereços
+      description: |
+        Agenda do portador do token (RF-006). O padrão vem primeiro.
+      responses:
+        '200':
+          description: Lista (pode ser vazia).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Address'
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [Customer]
+      operationId: addMyAddress
+      summary: Adicionar endereço
+      description: |
+        Inclui um endereço na agenda. O **primeiro** da conta vira padrão
+        automaticamente. Pedir `is_default: true` num endereço seguinte
+        troca o padrão na mesma gravação.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreAddressRequest'
+            example:
+              label: Casa
+              recipient_name: Joao Pedro
+              street: Av Paulista
+              number: '1000'
+              neighborhood: Bela Vista
+              city: Sao Paulo
+              state: SP
+              postal_code: 01310-100
+      responses:
+        '201':
+          description: Endereço criado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: |
+            | `error.code` | Quando |
+            |---|---|
+            | `validation_failed` | Campo faltando ou UF fora do enum. Traz `error.fields`. |
+            | `invalid_postal_code` | CEP sem 8 dígitos. |
+            | `invalid_address` | Campo obrigatório vazio ou longo demais. |
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
+
+  /v1/me/addresses/{addressId}:
+    parameters:
+      - name: addressId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Customer]
+      operationId: getMyAddress
+      summary: Detalhe de um endereço
+      description: |
+        Endereço da própria agenda. Id de outra pessoa devolve o mesmo 404
+        de inexistente — 403 confirmaria que o id é válido.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Não existe, ou não é do portador do token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags: [Customer]
+      operationId: updateMyAddress
+      summary: Editar endereço
+      description: |
+        Parcial. `is_default: true` troca o padrão. `label` ou `complement`
+        com `null` remove o campo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAddressRequest'
+            example:
+              is_default: true
+      responses:
+        '200':
+          description: Endereço atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Não existe, ou não é do portador do token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: |
+            `validation_failed`, `invalid_postal_code` ou `invalid_address`.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Customer]
+      operationId: removeMyAddress
+      summary: Remover endereço
+      description: |
+        Se o removido era o padrão e ainda restam outros, o mais antigo
+        restante vira o novo padrão — a agenda nunca fica sem padrão enquanto
+        houver endereço.
+      responses:
+        '204':
+          description: Removido.
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Não existe, ou não é do portador do token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/admin/users/{userId}/roles:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [Identity]
+      operationId: setPlatformRoles
+      summary: Definir papéis de plataforma
+      description: |
+        Substitui o conjunto inteiro de papéis do usuário (RF-007). Concede o
+        que falta e revoga o que sobrou. Idempotente: reenviar a mesma lista
+        não é erro.
+
+        Protegida por `auth.token` + `role:platform_admin`. O efeito no token
+        do **alvo** só aparece no próximo refresh — o middleware lê o token,
+        não o banco.
+
+        Um `platform_admin` **não pode revogar o próprio papel** (`409
+        cannot_revoke_own_admin`): sem isso a plataforma fica sem quem
+        conceda de novo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePlatformRolesRequest'
+            example:
+              roles: [buyer, seller, platform_admin]
+      responses:
+        '200':
+          description: Papéis atualizados.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserIdentity'
+              example:
+                id: 01a07e54-50d3-7303-a621-87f6f746040b
+                name: Maria
+                email: maria@shopmaster.test
+                roles: [buyer, platform_admin, seller]
+        '401':
+          description: Token ausente, inválido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: |
+            `forbidden` — o portador não tem `platform_admin` **neste token**.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: forbidden
+                  message: Voce nao tem permissao para esta acao.
+        '404':
+          description: Usuário alvo não existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            `cannot_revoke_own_admin` — tentativa de se rebaixar.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: |
+            `validation_failed` — lista vazia, papel fora do enum, ou `roles`
+            ausente. Traz `error.fields`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /v1/auth/register:
+    post:
+      tags: [Identity]
+      operationId: registerUser
+      summary: Cadastrar usuário
+      description: |
+        Cria uma conta e devolve o usuário recém-cadastrado.
+
+        O usuário **nasce com o papel `buyer`** (RF-001). Para vender, ele cria
+        uma loja depois — e é a criação da primeira loja que concede o papel
+        `seller`.
+
+        O e-mail é normalizado para minúsculas e é único na plataforma,
+        comparado **sem diferenciar maiúsculas** (RF-002): cadastrar
+        `Joao@x.com` depois de `joao@x.com` devolve `email_already_registered`.
+
+        Rota pública, limitada a 10 requisições por minuto por IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterUserRequest'
+            example:
+              name: Joao Pedro
+              email: joao@shopmaster.test
+              password: senha-forte-123
+      responses:
+        '201':
+          description: Conta criada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisteredUser'
+              example:
+                id: 01a07e54-50d3-7303-a621-87f6f746040b
+                name: Joao Pedro
+                email: joao.25989@shopmaster.test
+                roles: [buyer]
+                registered_at: '2026-09-08T00:04:10+00:00'
+        '422':
+          description: |
+            Entrada inválida ou e-mail já cadastrado. Distinguir pelo
+            `error.code`:
+
+            | `error.code` | Quando |
+            |---|---|
+            | `validation_failed` | Campo faltando, e-mail malformado, senha fora da política. Traz `error.fields`. |
+            | `email_already_registered` | Já existe conta com este e-mail. |
+            | `invalid_name` | Nome recusado pela invariante de domínio. |
+            | `invalid_email` | E-mail recusado pela invariante de domínio. |
+            | `invalid_password` | Senha recusada pela invariante de domínio. |
+
+            Os três últimos são a última linha de defesa: em uso normal, a
+            validação da requisição responde antes, com `validation_failed`.
+          content:
+            application/json:
+              schema:
+                # `anyOf`, não `oneOf`: a resposta de validação É um Error —
+                # mesma casca, com `fields` a mais. Os dois não são
+                # mutuamente exclusivos, e descrevê-los como se fossem
+                # mentiria sobre o formato.
+                anyOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
+              examples:
+                validacao:
+                  summary: Campos faltando
+                  value:
+                    error:
+                      code: validation_failed
+                      message: Os dados enviados sao invalidos.
+                      fields:
+                        name: ['The name field is required.']
+                        email: ['The email field is required.']
+                        password: ['The password field is required.']
+                duplicado:
+                  summary: E-mail já cadastrado
+                  value:
+                    error:
+                      code: email_already_registered
+                      message: "O e-mail 'joao@shopmaster.test' ja esta cadastrado."
+        '429':
+          description: Limite de requisições excedido (10 por minuto, por IP).
+
   /v1:
     get:
       tags: [Meta]
@@ -66,7 +706,7 @@ paths:
               example:
                 name: ShopMaster
                 version: v1
-                docs: http://localhost:8000/docs
+                docs: https://jpdevm.systems/shopmaster/docs
 
   /up:
     get:
@@ -125,6 +765,380 @@ components:
           maxLength: 3
           description: Código ISO-4217.
           examples: [BRL]
+
+    DocumentType:
+      type: string
+      enum: [cpf, cnh, cnpj]
+      description: |
+        O tipo decide **como** o valor é validado — e um CPF e uma CNH têm os
+        dois 11 dígitos, então adivinhar pelo formato seria ambíguo.
+
+        Os três têm dígito verificador conferido.
+
+        O **CNPJ** segue o formato alfanumérico da IN RFB 2.229/2024: 12
+        posições alfanuméricas de base + 2 dígitos verificadores, que
+        continuam sempre numéricos. É superconjunto do formato antigo — todo
+        CNPJ numérico já emitido continua válido pelo mesmo cálculo.
+
+        Passaporte **não** é aceito, de propósito: não tem checksum, nem o
+        brasileiro nem os estrangeiros. Aceitá-lo daria aparência de
+        verificação a um campo que ninguém consegue verificar.
+
+    Document:
+      type: object
+      required: [type, value]
+      properties:
+        type:
+          $ref: '#/components/schemas/DocumentType'
+        value:
+          type: string
+          description: Normalizado — só dígitos para CPF/CNH, maiúsculas sem máscara para CNPJ.
+          examples: ['52998224725', 'AB12CD34EFGH83']
+
+    BrazilianState:
+      type: string
+      enum:
+        [AC, AL, AP, AM, BA, CE, DF, ES, GO, MA, MT, MS, MG, PA, PB, PR, PE, PI, RJ, RN, RS, RO, RR, SC, SP, SE, TO]
+      description: UF brasileira.
+
+    Address:
+      type: object
+      description: |
+        Endereço da agenda do comprador. Não traz `user_id` — o dono é sempre
+        o portador do token.
+      required:
+        [id, label, recipient_name, street, number, complement, neighborhood, city, state, postal_code, postal_code_formatted, is_default]
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: [string, 'null']
+          examples: [Casa]
+        recipient_name:
+          type: string
+        street:
+          type: string
+        number:
+          type: string
+        complement:
+          type: [string, 'null']
+        neighborhood:
+          type: string
+        city:
+          type: string
+        state:
+          $ref: '#/components/schemas/BrazilianState'
+        postal_code:
+          type: string
+          description: Só dígitos.
+          examples: ['01310100']
+        postal_code_formatted:
+          type: string
+          examples: ['01310-100']
+        is_default:
+          type: boolean
+
+    StoreAddressRequest:
+      type: object
+      required: [recipient_name, street, number, neighborhood, city, state, postal_code]
+      properties:
+        label:
+          type: [string, 'null']
+          maxLength: 40
+        recipient_name:
+          type: string
+          maxLength: 120
+        street:
+          type: string
+          maxLength: 200
+        number:
+          type: string
+          maxLength: 20
+        complement:
+          type: [string, 'null']
+          maxLength: 120
+        neighborhood:
+          type: string
+          maxLength: 120
+        city:
+          type: string
+          maxLength: 120
+        state:
+          $ref: '#/components/schemas/BrazilianState'
+        postal_code:
+          type: string
+          description: Aceita máscara; grava só dígitos.
+        is_default:
+          type: boolean
+          description: Se true, este passa a ser o padrão (desmarca o anterior).
+
+    UpdateAddressRequest:
+      type: object
+      description: Parcial — o que não for enviado não é alterado.
+      properties:
+        label:
+          type: [string, 'null']
+        recipient_name:
+          type: string
+        street:
+          type: string
+        number:
+          type: string
+        complement:
+          type: [string, 'null']
+        neighborhood:
+          type: string
+        city:
+          type: string
+        state:
+          $ref: '#/components/schemas/BrazilianState'
+        postal_code:
+          type: string
+        is_default:
+          type: boolean
+
+    UpdatePlatformRolesRequest:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PlatformRole'
+          description: Conjunto completo desejado — substitui o atual.
+
+    UserIdentity:
+      type: object
+      description: |
+        Identidade sem credencial. Usada na resposta administrativa de papéis.
+        Traz `roles` porque aqui a pergunta é autorização, não perfil.
+      required: [id, name, email, roles]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformRole'
+
+    UserProfile:
+      type: object
+      description: |
+        A conta como o **dono** dela a vê. O documento aparece por inteiro
+        porque quem pede é o titular. Nunca reaproveite este formato em rota
+        de terceiro — CPF é dado sensível.
+
+        **Não traz `roles`.** Papel é autorização, não perfil: o banco pode já
+        ter um papel que o token ainda não tem, e devolvê-lo aqui prometeria
+        uma permissão que o middleware vai recusar. Para saber o que o
+        portador pode fazer **agora**, use `GET /v1/auth/session`.
+      required: [id, name, email, phone, phone_formatted, document]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: [string, 'null']
+          description: Só dígitos, DDD incluído.
+          examples: ['11988887777']
+        phone_formatted:
+          type: [string, 'null']
+          examples: ['(11) 98888-7777']
+        document:
+          oneOf:
+            - $ref: '#/components/schemas/Document'
+            - type: 'null'
+
+    UpdateProfileRequest:
+      type: object
+      description: |
+        Parcial — o que não for enviado não é alterado. Corpo vazio é aceito e
+        devolve o perfil inalterado, para o cliente que reenvia o formulário
+        sem mudanças não precisar tratar um erro.
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        phone:
+          type: [string, 'null']
+          description: |
+            Aceita máscara e `+55`; é normalizado para só dígitos.
+
+            Três estados: **omitir** não mexe, **um valor** substitui, e
+            **`null` explícito remove** o telefone da conta (RFC 7396).
+          examples: ['(11) 98888-7777']
+        document:
+          type: string
+          description: Obrigatório junto de `document_type`. Imutável depois de definido.
+          examples: ['529.982.247-25']
+        document_type:
+          $ref: '#/components/schemas/DocumentType'
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          examples: ['joao@shopmaster.test']
+        password:
+          type: string
+          format: password
+          examples: ['senha-forte-123']
+
+    RefreshTokenRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          description: O refresh token devolvido pelo login ou pela troca anterior.
+
+    AuthSession:
+      type: object
+      description: O resultado de um login ou de uma troca de refresh — o mesmo formato nos dois.
+      required: [access_token, refresh_token, token_type, expires_in, user]
+      properties:
+        access_token:
+          type: string
+          description: 'JWT HS256. Vai no cabeçalho `Authorization: Bearer <token>`.'
+        refresh_token:
+          type: string
+          description: JWT HS256 de **uso único**. Serve só para `POST /v1/auth/refresh`.
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          description: Vida do **access** token, em segundos.
+          examples: [3600]
+        user:
+          type: object
+          required: [id, name, email, roles]
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+            email:
+              type: string
+              format: email
+            roles:
+              type: array
+              items:
+                $ref: '#/components/schemas/PlatformRole'
+
+    AuthenticatedUser:
+      type: object
+      description: O portador do token, montado a partir dos claims assinados.
+      required: [id, email, roles]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformRole'
+
+    RegisterUserRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Espaços das pontas e repetidos internamente são normalizados.
+          examples: ['Joao Pedro']
+        email:
+          type: string
+          format: email
+          maxLength: 255
+          description: Normalizado para minúsculas. Único na plataforma.
+          examples: ['joao@shopmaster.test']
+        password:
+          type: string
+          format: password
+          minLength: 8
+          description: |
+            Mínimo de 8 caracteres e máximo de **72 bytes** — não 72
+            caracteres. O limite é do bcrypt, que trunca em silêncio a partir
+            daí; um emoji ocupa 4 bytes.
+          examples: ['senha-forte-123']
+
+    RegisteredUser:
+      type: object
+      required: [id, name, email, roles, registered_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID versão 7 — ordenável no tempo.
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        roles:
+          type: array
+          description: |
+            Papéis de **plataforma**, acumuláveis. Papel de loja (`owner`,
+            `admin`, `finance`) não aparece aqui: é por loja e resolvido a
+            cada requisição.
+          items:
+            $ref: '#/components/schemas/PlatformRole'
+        registered_at:
+          type: string
+          format: date-time
+
+    PlatformRole:
+      type: string
+      enum: [buyer, seller, platform_admin]
+      description: |
+        `buyer` — comprador, papel de todo usuário no cadastro.
+        `seller` — dono de loja, concedido ao criar a primeira.
+        `platform_admin` — administração da plataforma.
+
+    ValidationError:
+      type: object
+      description: |
+        Mesma casca do `Error`, com o detalhe por campo. `fields` é acréscimo:
+        um cliente que só conheça `code` e `message` continua funcionando.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, fields]
+          properties:
+            code:
+              type: string
+              enum: [validation_failed]
+            message:
+              type: string
+            fields:
+              type: object
+              additionalProperties:
+                type: array
+                items:
+                  type: string
 
     Pagination:
       type: object

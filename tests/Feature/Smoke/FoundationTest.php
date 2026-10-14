@@ -68,12 +68,45 @@ final class FoundationTest extends TestCase
         $this->assertSame('v1', $resposta->json('version'));
     }
 
-    public function test_erro_sob_v1_sai_em_json_e_nao_em_html(): void
+    public function test_erro_sob_v1_sai_em_json_no_formato_do_projeto(): void
     {
         $resposta = $this->get('/v1/rota-que-nao-existe');
 
-        $resposta->assertNotFound();
+        $resposta->assertNotFound()
+            ->assertJsonPath('error.code', 'not_found');
+
         $this->assertStringContainsString('application/json', (string) $resposta->headers->get('Content-Type'));
+    }
+
+    public function test_metodo_nao_permitido_tambem_respeita_o_formato_de_erro(): void
+    {
+        $this->putJson('/v1')
+            ->assertStatus(405)
+            ->assertJsonPath('error.code', 'method_not_allowed');
+    }
+
+    public function test_respeita_o_prefixo_e_o_esquema_do_proxy_reverso(): void
+    {
+        // Em producao a app vive atras do Traefik, em https://jpdevm.systems/shopmaster.
+        // O Traefik remove o prefixo antes de encaminhar, entao a app recebe
+        // /v1 — mas toda URL que ela gerar precisa sair COM o /shopmaster, ou
+        // o cliente segue um link quebrado.
+        //
+        // Quem carrega essa informacao sao os cabecalhos X-Forwarded-*, e o
+        // Laravel so os respeita se o proxy for confiavel (trustProxies).
+        $resposta = $this->withHeaders([
+            'X-Forwarded-Proto' => 'https',
+            'X-Forwarded-Host' => 'jpdevm.systems',
+            'X-Forwarded-Prefix' => '/shopmaster',
+        ])->getJson('/v1');
+
+        $resposta->assertOk();
+
+        $this->assertSame(
+            'https://jpdevm.systems/shopmaster/docs',
+            $resposta->json('docs'),
+            'Sem confiar no proxy, a URL sai sem o prefixo e em http.',
+        );
     }
 
     public function test_o_health_check_responde(): void

@@ -2,6 +2,12 @@
 
 declare(strict_types=1);
 
+use Customer\Interface\Http\Controllers\MyAddressController;
+use Identity\Interface\Http\Controllers\AdminUserRolesController;
+use Identity\Interface\Http\Controllers\AuthController;
+use Identity\Interface\Http\Controllers\MyProfileController;
+use Identity\Interface\Http\Controllers\RegisterUserController;
+use Identity\Interface\Http\Controllers\SessionController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -43,9 +49,47 @@ Route::prefix('v1')->group(function (): void {
     // -----------------------------------------------------------------
     // Identity — Fase 1
     // -----------------------------------------------------------------
-    // Route::post('/auth/register', [RegisterController::class, 'store']);
-    // Route::post('/auth', [AuthController::class, 'store']);
-    // Route::post('/auth/refresh', [AuthController::class, 'refresh']);
+
+    // RF-001 — cadastro. Aberta de propósito (é a porta de entrada), e por
+    // isso limitada por IP: sem o throttle, é onde alguém enumera e-mails
+    // cadastrados a partir do 422 de duplicidade (RNF-025).
+    Route::post('/auth/register', [RegisterUserController::class, 'store'])
+        ->middleware('throttle:10,1');
+
+    // RF-003 — login. Limitada por IP: é a rota onde se tenta senha em
+    // massa, e o custo do bcrypt não é defesa suficiente sozinho (RNF-025).
+    Route::post('/auth', [AuthController::class, 'store'])
+        ->middleware('throttle:10,1');
+
+    // RF-004 — troca do refresh, de uso único. Limite mais folgado que o do
+    // login: um cliente legítimo com sessão longa passa por aqui a cada hora.
+    Route::post('/auth/refresh', [AuthController::class, 'refresh'])
+        ->middleware('throttle:30,1');
+
+    // RNF-025 — rate limit por usuário nas rotas autenticadas. O throttle do
+    // Laravel usa o id do usuário quando há um autenticado e cai para o IP
+    // quando não há; como o `auth.token` roda antes, aqui é por usuário.
+    //
+    // Não é só higiene: o `PATCH /me` com `document` responde
+    // "já cadastrado", e CPF é enumerável — sem limite, dá para varrer o
+    // espaço de CPFs válidos e descobrir quem tem conta na plataforma.
+    Route::middleware(['auth.token', 'throttle:60,1'])->group(function (): void {
+        // Quem sou eu, segundo este token. Prova o middleware de ponta a
+        // ponta e deixa o cliente conferir a validade sem efeito colateral.
+        Route::get('/auth/session', [SessionController::class, 'show']);
+
+        // RF-005 — minha conta. O id vem do token, nunca da rota nem do
+        // corpo: não há como apontar para a conta de outra pessoa.
+        Route::get('/me', [MyProfileController::class, 'show']);
+        Route::patch('/me', [MyProfileController::class, 'update']);
+
+        // RF-006 — agenda de endereços. O dono é o token; id alheio = 404.
+        Route::get('/me/addresses', [MyAddressController::class, 'index']);
+        Route::post('/me/addresses', [MyAddressController::class, 'store']);
+        Route::get('/me/addresses/{addressId}', [MyAddressController::class, 'show']);
+        Route::patch('/me/addresses/{addressId}', [MyAddressController::class, 'update']);
+        Route::delete('/me/addresses/{addressId}', [MyAddressController::class, 'destroy']);
+    });
 
     // -----------------------------------------------------------------
     // Catálogo público — Fase 3
@@ -84,10 +128,14 @@ Route::prefix('v1')->group(function (): void {
     // });
 
     // -----------------------------------------------------------------
-    // Plataforma
+    // Plataforma — RF-007
     // -----------------------------------------------------------------
-    // Route::prefix('admin')->middleware(['auth.token', 'role:platform_admin'])->group(function (): void {
-    //     Route::post('/stores/{storeId}/approve', [AdminStoreController::class, 'approve']);
-    //     Route::post('/categories', [AdminCategoryController::class, 'store']);
-    // });
+    Route::prefix('admin')->middleware(['auth.token', 'role:platform_admin', 'throttle:60,1'])->group(function (): void {
+        // Substitui o conjunto de papéis. O access token do alvo só reflete
+        // a mudança no próximo refresh — o middleware lê o token, não o banco.
+        Route::patch('/users/{userId}/roles', [AdminUserRolesController::class, 'update']);
+
+        // Route::post('/stores/{storeId}/approve', [AdminStoreController::class, 'approve']);
+        // Route::post('/categories', [AdminCategoryController::class, 'store']);
+    });
 });

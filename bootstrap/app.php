@@ -1,9 +1,15 @@
 <?php
 
+use Identity\Interface\Http\Middleware\AuthenticateWithAccessToken;
+use Identity\Interface\Http\Middleware\RequirePlatformRole;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
+use Shared\Http\ErrorResource;
+use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -16,11 +22,32 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Em produção a aplicação vive atrás do Traefik, e o php-fpm só vê a
+        // conexão interna do Docker. Sem confiar no proxy, o Laravel conclui
+        // que a requisição é HTTP e gera URLs `http://` atrás do seu HTTPS —
+        // e perde o prefixo `/shopmaster`, devolvendo links quebrados.
+        //
+        // Confiando, ele lê `X-Forwarded-Proto`, `X-Forwarded-Host` e
+        // `X-Forwarded-Prefix`. Este último já vem no conjunto padrão do
+        // Laravel, e o Symfony o aplica em `getBaseUrl()` — que é o que o
+        // `UrlGenerator` usa. Uma linha resolve o prefixo inteiro.
+        //
+        // `at: '*'` é seguro AQUI pelo desenho da rede: o php-fpm está só nas
+        // redes `appnet` e `internal`, e a única coisa que o alcança é o nginx
+        // da própria app, que por sua vez só é alcançado pelo Traefik. Se algum
+        // dia este container publicar porta ou entrar numa rede compartilhada,
+        // esta linha precisa virar uma lista de CIDRs.
+        //
+        // O outro lado da defesa está no Traefik: `aliasheadersstrategy=delete`
+        // descarta cabeçalhos com sublinhado (`X_Forwarded_Proto`), que o
+        // FastCGI converteria na mesma variável e permitiria falsificação.
+        $middleware->trustProxies(at: '*');
+
         $middleware->alias([
-            // Fase 1 (Identity) — autenticação e papel de PLATAFORMA, que
-            // viaja no token:
-            // 'auth.token' => Shared\Auth\Interface\Http\Middleware\AuthenticateWithAccessToken::class,
-            // 'role' => Shared\Auth\Interface\Http\Middleware\RequirePlatformRole::class,
+            // Autenticação por access token. O papel de PLATAFORMA viaja
+            // no token; a guarda `role` lê esses claims (RF-007).
+            'auth.token' => AuthenticateWithAccessToken::class,
+            'role' => RequirePlatformRole::class,
 
             // Fase 2 (Store) — papel de LOJA, resolvido por requisição a
             // partir do {storeId} da rota. Não está no token de propósito:
@@ -32,6 +59,39 @@ return Application::configure(basePath: dirname(__DIR__))
         // Erro sob /v1 é sempre JSON, mesmo sem Accept: application/json —
         // sem isso um 500 devolve HTML para um cliente que só fala JSON.
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('v1/*') || $request->expectsJson(),
+            fn (Request $request) => $request->is('v1', 'v1/*') || $request->expectsJson(),
         );
+
+        // RNF-061 — erro SEMPRE em {"error": {"code", "message"}}.
+        //
+        // Sem isto, três formatos conviveriam sob /v1: o nosso, o
+        // {"message", "errors"} da validação do Laravel, e o {"message"} do
+        // 404. Um cliente que trata erro por `error.code` quebraria em dois
+        // deles, e o contrato do Swagger seria mentira.
+        $exceptions->render(function (ValidationException $e, Request $request) {
+            if (! $request->is('v1', 'v1/*')) {
+                return null;
+            }
+
+            return response()->json(
+                ErrorResource::withFields('validation_failed', 'Os dados enviados sao invalidos.', $e->errors()),
+                422,
+            );
+        });
+
+        $exceptions->render(function (NotFoundHttpException $e, Request $request) {
+            if (! $request->is('v1', 'v1/*')) {
+                return null;
+            }
+
+            return response()->json(ErrorResource::of('not_found', 'Recurso nao encontrado.'), 404);
+        });
+
+        $exceptions->render(function (MethodNotAllowedHttpException $e, Request $request) {
+            if (! $request->is('v1', 'v1/*')) {
+                return null;
+            }
+
+            return response()->json(ErrorResource::of('method_not_allowed', 'Metodo nao permitido para este recurso.'), 405);
+        });
     })->create();

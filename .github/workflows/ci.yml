@@ -1,0 +1,110 @@
+name: CI
+
+# O portão. Não faz deploy — só diz se o código pode ser promovido.
+#
+# `develop` e `master` de propósito: é em develop que o trabalho acontece, e
+# não serve descobrir a quebra só na hora de promover para produção.
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+    branches: [master, develop]
+
+concurrency:
+  # Push novo no mesmo ref cancela a execução anterior: ninguém se importa
+  # com o resultado de um commit que já foi substituído.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Testes, estilo e contrato
+    runs-on: ubuntu-latest
+
+    # A suíte NÃO roda sem Postgres e Redis de verdade: os Feature tests batem
+    # no banco `shopmaster_test` e os stores de Redis são reais, nos DBs 11 a
+    # 15 (ver phpunit.xml). Sem estes serviços o job falha na primeira
+    # execução, e o erro não parece ser disso.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: shopmaster_test
+          POSTGRES_USER: shopmaster
+          POSTGRES_PASSWORD: secret
+        ports: ['5432:5432']
+        # Sem health check, os passos começam antes de o Postgres aceitar
+        # conexão — e a falha é INTERMITENTE, que é o pior tipo: você refaz
+        # o job e ele passa.
+        options: >-
+          --health-cmd "pg_isready -U shopmaster"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # Valem para todos os passos. O phpunit.xml já fixa o NOME do banco e os
+    # DBs do Redis; aqui vão só host e credenciais, que são do runner.
+    env:
+      DB_HOST: 127.0.0.1
+      DB_USERNAME: shopmaster
+      DB_PASSWORD: secret
+      REDIS_HOST: 127.0.0.1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          # Mesma versão do Dockerfile, para o CI testar o que vai rodar.
+          php-version: '8.4'
+          # `predis` é PHP puro, então NÃO precisamos da extensão redis.
+          extensions: pdo_pgsql, pgsql, intl, zip
+          coverage: none
+
+      - name: Cache do Composer
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+
+      - run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Preparar o .env
+        # A APP_KEY é gerada a cada execução: o segredo de produção não tem
+        # nada que fazer aqui.
+        run: cp .env.example .env && php artisan key:generate
+
+      - name: Migrar do zero
+        # `migrate:fresh` e não `migrate`: valida a cadeia inteira de
+        # migrations partindo do vazio, que é o que a skill `criar-feature`
+        # exige no fechamento. Se uma migration só funciona sobre um banco
+        # já existente, o erro aparece aqui e não em produção.
+        run: php artisan migrate:fresh --force
+
+      - name: Testes
+        # Unit, Feature e Architecture — o Architecture é o que reprova quem
+        # atravessa fronteira de bounded context ou encosta o domínio no
+        # framework.
+        run: php vendor/bin/phpunit
+
+      - name: Estilo
+        run: ./vendor/bin/pint --test
+
+      - name: Contrato OpenAPI
+        # Node 22 porque o Redocly exige >= 20.19 — a máquina de
+        # desenvolvimento está em 20.17 e já reclama.
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: npx --yes @redocly/cli@latest lint

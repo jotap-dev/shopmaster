@@ -24,7 +24,7 @@ Referência de padrão: o `participant-api` — a mesma arquitetura em camadas, 
 |---|---|---|---|
 | **Shared** | Kernel | `EventBus`, `Money`, `Clock`, `ErrorResource`, `Auth` | Parcial |
 | **Identity** | Genérico | Registro, login, refresh, papéis de plataforma | Esqueleto |
-| **Customer** | Suporte | Dados do cliente, endereços, favoritos | Esqueleto |
+| **Customer** | Suporte | Endereços salvos e favoritos | Parcial (endereços) |
 | **Store** | Core | Loja, membros, papéis de loja, aprovação, comissão | Esqueleto |
 | **Catalog** | Core | Produto de uma loja, variação (SKU global), categoria, busca | Esqueleto |
 | **Inventory** | Core | Saldo por SKU, reserva, baixa | Esqueleto |
@@ -77,13 +77,22 @@ A superfície tem três famílias, separadas por **autorização**, não por for
 
 Hoje, no ar:
 
-| Rota | Auth | O quê |
-|---|---|---|
-| `GET /v1` | pública | Identificação da API |
-| `GET /up` | pública | Health check |
-| `GET /docs` | pública | Swagger UI |
+| Rota | Auth | Contexto | O quê |
+|---|---|---|---|
+| `POST /v1/auth/register` | pública | Identity | Cadastro (RF-001). Nasce com o papel `buyer` |
+| `POST /v1/auth` | pública | Identity | Login (RF-003) → access + refresh token |
+| `POST /v1/auth/refresh` | pública | Identity | Troca do refresh, de uso único (RF-004) |
+| `GET /v1/auth/session` | Bearer | Identity | Quem sou eu, segundo este token |
+| `GET /v1/me` | Bearer | Identity | Minha conta |
+| `PATCH /v1/me` | Bearer | Identity | Editar nome, telefone e documento (RF-005) |
+| `GET/POST /v1/me/addresses` | Bearer | Customer | Agenda de endereços (RF-006) |
+| `GET/PATCH/DELETE /v1/me/addresses/{id}` | Bearer | Customer | Detalhe / editar / remover endereço |
+| `PATCH /v1/admin/users/{id}/roles` | `platform_admin` | Identity | Conceder/revogar papéis (RF-007) |
+| `GET /v1` | pública | — | Identificação da API |
+| `GET /up` | pública | — | Health check |
+| `GET /docs` | pública | — | Swagger UI |
 
-As rotas de negócio entram conforme as fases do plano. Contrato em [docs/openapi/openapi.yaml](docs/openapi/openapi.yaml), mantido à mão.
+As demais rotas entram conforme as fases do plano. Contrato em [docs/openapi/openapi.yaml](docs/openapi/openapi.yaml), mantido à mão.
 
 ## Stack
 
@@ -118,6 +127,8 @@ colima start
 docker compose up -d --build && docker compose exec app php artisan migrate
 ```
 
+A API sobe em `http://localhost:8001` e a documentação em `/docs`. A porta é 8001 e não 8000 porque esta última é disputada demais; trocar é `APP_PORT=9005 docker compose up -d`.
+
 O Postgres e o Redis **não** são containers — o app conecta nos do host. Detalhes e a variante com serviços containerizados em [docs/docker.md](docs/docker.md).
 
 ### Nativo
@@ -127,8 +138,10 @@ composer install && cp .env.example .env && php artisan key:generate
 ```
 
 ```bash
-php artisan migrate && php artisan serve
+php artisan migrate && composer dev
 ```
+
+O `composer dev` usa a mesma porta do Docker (8001), para o `APP_URL` valer nos dois modos.
 
 ## Comandos
 
